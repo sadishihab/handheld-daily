@@ -97,3 +97,119 @@ body {
     display: none;
   }
 }
+
+/* --- Overlay panel: start, result and practice screens ------------------- */
+
+.panel {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  /* Sits over the frozen last frame of the run rather than hiding it. */
+  background: color-mix(in srgb, var(--lcd-bg) 88%, transparent);
+  text-align: center;
+}
+
+.panel__inner {
+  width: 100%;
+  max-width: 20rem;
+}
+
+.panel__eyebrow {
+  font-size: 0.75rem;
+  letter-spacing: 0.16em;
+  opacity: 0.6;
+}
+
+.panel__title {
+  margin-top: 0.5rem;
+  font-size: clamp(1.35rem, 7vw, 2rem);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-indent: 0.14em;
+  text-shadow: 0 0 0.75rem rgba(125, 255, 138, 0.35);
+}
+
+.panel__stats {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.35rem 1rem;
+  margin: 1.5rem 0;
+  font-size: 0.9rem;
+  text-align: left;
+}
+
+.panel__stats dt {
+  letter-spacing: 0.12em;
+  opacity: 0.6;
+}
+
+.panel__stats dd {
+  font-weight: 700;
+  text-align: right;
+}
+
+.panel__note,
+.panel__footer {
+  font-size: 0.75rem;
+  line-height: 1.5;
+  letter-spacing: 0.06em;
+  opacity: 0.6;
+}
+
+.panel__footer {
+  margin-top: 1.25rem;
+  /* Digits change every second; a fixed-width figure stops the line jittering. */
+  font-variant-numeric: tabular-nums;
+}
+
+.panel__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: 1.25rem;
+}
+
+.btn {
+  /* 44px is the smallest reliably tappable target on a phone. */
+  min-height: 2.75rem;
+  padding: 0.7rem 1.25rem;
+  font: inherit;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--lcd-on);
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--lcd-on) 45%, transparent);
+  border-radius: 0.25rem;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.btn--primary {
+  background: color-mix(in srgb, var(--lcd-on) 16%, transparent);
+  border-color: var(--lcd-on);
+}
+
+.btn:active {
+  background: color-mix(in srgb, var(--lcd-on) 28%, transparent);
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--lcd-on);
+  outline-offset: 2px;
+}
+
+/* Practice is visibly a different place from the daily run. */
+.lcd--practice {
+  box-shadow:
+    inset 0 0 4rem rgba(0, 0, 0, 0.6),
+    inset 0 0 0 2px color-mix(in srgb, var(--lcd-on) 22%, transparent);
+}
+
+.lcd--practice .panel__title {
+  text-shadow: none;
+}

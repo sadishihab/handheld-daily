@@ -13,8 +13,23 @@
 <body>
   <main class="screen">
     <h1 class="visually-hidden">Handheld Daily</h1>
-    <div class="lcd">
-      <canvas id="screen" class="lcd__canvas" aria-label="Parachute rescue. Tap the left or right half of the screen to steer the boat."></canvas>
+    <div class="lcd" id="lcd">
+      <canvas id="screen" class="lcd__canvas"
+        aria-label="Parachute rescue. Tap the left or right half of the screen to steer the boat."></canvas>
+
+      <!-- Overlay for the non-play screens. Real DOM rather than canvas: the
+           share control has to be a focusable button that a screen reader can
+           reach, and the Web Share API needs a genuine user gesture. -->
+      <div class="panel" id="panel" role="dialog" aria-live="polite" hidden>
+        <div class="panel__inner">
+          <p class="panel__eyebrow" id="panel-eyebrow"></p>
+          <p class="panel__title" id="panel-title"></p>
+          <dl class="panel__stats" id="panel-stats"></dl>
+          <p class="panel__note" id="panel-note" hidden></p>
+          <div class="panel__actions" id="panel-actions"></div>
+          <p class="panel__footer" id="panel-footer" hidden></p>
+        </div>
+      </div>
     </div>
   </main>
   <script type="module" src="src/main.js"></script>

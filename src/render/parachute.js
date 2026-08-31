@@ -97,10 +97,21 @@ export function createParachuteRenderer(canvas) {
 
   return {
     resize: lcd.resize,
-    /** @param {object} state Live game state. Read only. */
-    draw(state) {
+    /**
+     * @param {object} state Live game state. Read only.
+     * @param {{badge?: string|null}} [view] Chrome that is not part of the
+     *   simulation -- currently the PRACTICE label.
+     */
+    draw(state, view = {}) {
       lcd.clear();
       drawReadout(state);
+      if (view.badge) {
+        lcd.drawText(view.badge, GRID_WIDTH / 2, 0, {
+          align: 'center',
+          scale: 1.1,
+          style: lcd.colors.ghost,
+        });
+      }
       drawWater(state);
       drawBoat(state);
       for (const p of state.parachutists) drawParachutist(p);
