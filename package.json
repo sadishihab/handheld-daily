@@ -5,7 +5,7 @@
   "description": "A daily mobile game with a retro LCD handheld screen.",
   "type": "module",
   "scripts": {
-    "test": "node test/determinism.test.js && node test/progress.test.js && node test/flow.test.js",
+    "test": "node test/determinism.test.js && node test/progress.test.js && node test/styles.test.js && node test/flow.test.js",
     "deploy": "wrangler deploy",
     "preview": "wrangler dev"
   },

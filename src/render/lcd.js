@@ -37,6 +37,7 @@ export function createLcdSurface(canvas, { gridWidth, gridHeight }) {
   let ink = '#7dff8a';
   let ground = '#0b1a0f';
   let ghost = 'rgba(125, 255, 138, 0.08)';
+  let dim = 'rgba(125, 255, 138, 0.45)';
 
   /** Recompute geometry. Call on resize and orientation change. */
   function resize() {
@@ -60,6 +61,7 @@ export function createLcdSurface(canvas, { gridWidth, gridHeight }) {
     ink = cssVar(canvas, '--lcd-on', ink);
     ground = cssVar(canvas, '--lcd-bg', ground);
     ghost = cssVar(canvas, '--lcd-ghost', ghost);
+    dim = cssVar(canvas, '--lcd-dim', dim);
   }
 
   function clear() {
@@ -94,6 +96,18 @@ export function createLcdSurface(canvas, { gridWidth, gridHeight }) {
     ctx.fillText(text, originX + col * cell, originY + row * cell);
   }
 
+  /** Paint a solid block of cells, ignoring the dot-matrix gap. Used to
+   *  clear a strip so chrome drawn over it stays legible. */
+  function fillArea(col, row, widthCells, heightCells, style) {
+    ctx.fillStyle = style;
+    ctx.fillRect(
+      originX + col * cell,
+      originY + row * cell,
+      widthCells * cell,
+      heightCells * cell
+    );
+  }
+
   /** Cover the whole panel -- used for the miss flash. */
   function flood(style) {
     ctx.fillStyle = style;
@@ -105,10 +119,11 @@ export function createLcdSurface(canvas, { gridWidth, gridHeight }) {
     clear,
     fillCell,
     fillRow,
+    fillArea,
     drawText,
     flood,
     get colors() {
-      return { ink, ground, ghost };
+      return { ink, ground, ghost, dim };
     },
   };
 }

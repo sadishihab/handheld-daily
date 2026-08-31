@@ -5,12 +5,27 @@
   --lcd-bg-dim: #08150c;
   --lcd-on: #7dff8a;
   --lcd-ghost: rgba(125, 255, 138, 0.08);
+  /* Legible but clearly secondary -- ghost is too faint for text. */
+  --lcd-dim: rgba(125, 255, 138, 0.45);
 }
 
 * {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+}
+
+/*
+ * The hidden attribute must beat any author display rule.
+ *
+ * The UA stylesheet's [hidden] { display: none } is in the user-agent origin,
+ * so ANY author-origin display declaration wins over it no matter how low its
+ * specificity. .panel sets display:flex, which silently defeated
+ * `panel.hidden = true` -- the panel stayed on screen over the running game
+ * and swallowed every tap. Anything toggled via .hidden needs this.
+ */
+[hidden] {
+  display: none !important;
 }
 
 html,
@@ -108,8 +123,9 @@ body {
   align-items: center;
   justify-content: center;
   padding: 1.25rem;
-  /* Sits over the frozen last frame of the run rather than hiding it. */
-  background: color-mix(in srgb, var(--lcd-bg) 88%, transparent);
+  /* Opaque. A translucent panel let sprites and the readout show through the
+     text and buttons, which was unreadable on a busy frame. */
+  background: var(--lcd-bg);
   text-align: center;
 }
 

@@ -35,6 +35,7 @@ src/ui/panel.js            start / result / practice overlay
 styles/main.css            LCD panel styling
 test/determinism.test.js   determinism suite
 test/progress.test.js      streaks, daily lockout, share text, dev clock
+test/styles.test.js        cascade rules the UI depends on
 test/flow.test.js          end-to-end ritual against a mini-DOM
 test/minidom.js            the mini-DOM the flow test boots the app in
 docs/DETERMINISM.md        rules simulation code must follow
@@ -104,7 +105,13 @@ Runs three suites with Node -- no framework, no `npm install` needed.
 - `progress.test.js` -- streaks increment on consecutive days and reset after a
   gap, a day cannot be played twice, share text is exactly the intended shape,
   and the dev clock is refused off a dev host.
+- `styles.test.js` -- asserts the cascade rules the UI depends on, chiefly that
+  `[hidden]` beats the author `display` rules that would otherwise defeat it.
 - `flow.test.js` -- boots the real `src/main.js` against a mini-DOM and walks
   the whole ritual: play, lock out, roll over to the next day, share, practice.
+
+The split matters: `flow.test.js` drives a DOM stub with no CSS cascade, so a
+rule that visually defeats `element.hidden` is invisible to it. Anything that
+depends on the cascade belongs in `styles.test.js`.
 
 Read [docs/DETERMINISM.md](docs/DETERMINISM.md) before adding simulation code.

@@ -46,6 +46,10 @@ ok('the run does not auto-start on load', dom.ids.panel.hidden === false && dom.
 
 dom.click('PLAY');
 ok('panel hides when the run starts', dom.ids.panel.hidden === true);
+ok('PLAY leaves no panel buttons live', dom.buttons().length === 0, JSON.stringify(dom.buttons()));
+dom.pump(60);
+ok('PLAY actually starts the simulation', window.handheldDaily.game.state.step > 0,
+   `step ${window.handheldDaily.game.state.step}`);
 
 playToEnd(dom);
 ok('the run ends on its own', dom.ids.panel.hidden === false);
@@ -100,6 +104,15 @@ ok('practice start screen appears', dom.panelText()?.includes('FREE PLAY'), Stri
 ok('practice marks the panel', dom.ids.lcd.classList.contains('lcd--practice'));
 
 dom.click('START');
+ok('practice START hides the panel', dom.ids.panel.hidden === true, `panel hidden=${dom.ids.panel.hidden}`);
+ok('practice START leaves no panel buttons live', dom.buttons().length === 0, JSON.stringify(dom.buttons()));
+
+// The run must actually be advancing, not merely un-panelled.
+dom.pump(60);
+const practiceStep = window.handheldDaily.game.state.step;
+ok('practice START actually starts the simulation', practiceStep > 0, `step ${practiceStep}`);
+ok('the practice badge is requested while playing', dom.ids.lcd.classList.contains('lcd--practice'));
+
 playToEnd(dom);
 ok('practice run ends with its own screen', dom.panelText()?.includes('PRACTICE'), String(dom.panelText()));
 ok('practice offers unlimited replay', dom.buttons().includes('PLAY AGAIN'), JSON.stringify(dom.buttons()));
@@ -109,6 +122,10 @@ ok('practice says it does not count', /do not count/i.test(dom.ids['panel-note']
 
 const streakBefore = JSON.parse(storage.getItem('handheld-daily:v1')).streak;
 dom.click('PLAY AGAIN');
+ok('PLAY AGAIN hides the panel and restarts', dom.ids.panel.hidden === true);
+dom.pump(30);
+ok('PLAY AGAIN starts a fresh run', window.handheldDaily.game.state.step > 0 && !window.handheldDaily.game.isOver,
+   `step ${window.handheldDaily.game.state.step}`);
 playToEnd(dom);
 const streakAfter = JSON.parse(storage.getItem('handheld-daily:v1')).streak;
 ok('practice runs do not touch the streak', streakBefore === streakAfter, `${streakBefore} -> ${streakAfter}`);

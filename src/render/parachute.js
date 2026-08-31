@@ -105,16 +105,22 @@ export function createParachuteRenderer(canvas) {
     draw(state, view = {}) {
       lcd.clear();
       drawReadout(state);
-      if (view.badge) {
-        lcd.drawText(view.badge, GRID_WIDTH / 2, 0, {
-          align: 'center',
-          scale: 1.1,
-          style: lcd.colors.ghost,
-        });
-      }
       drawWater(state);
       drawBoat(state);
       for (const p of state.parachutists) drawParachutist(p);
+
+      // Drawn after the scene, over a cleared strip along the bottom. Not the
+      // readout row: that already carries the score on the left and the miss
+      // pips on the right, and a label between them reads as a collision on a
+      // narrow screen.
+      if (view.badge) {
+        lcd.fillArea(0, GRID_HEIGHT - 1, GRID_WIDTH, 1, lcd.colors.ground);
+        lcd.drawText(view.badge, GRID_WIDTH / 2, GRID_HEIGHT - 1, {
+          align: 'center',
+          scale: 1,
+          style: lcd.colors.dim,
+        });
+      }
 
       // Flash on the frames right after a splash. Blinks rather than holds,
       // which is how a real segment display signals a fault.
