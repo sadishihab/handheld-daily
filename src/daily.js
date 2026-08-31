@@ -11,8 +11,14 @@
  * 00:00 UTC everywhere, not at local midnight.
  */
 
-/** First day of the game, as a UTC calendar date. Puzzle #1. */
-export const LAUNCH_DATE_UTC = '2026-01-01';
+/**
+ * First day of the game, as a UTC calendar date. Puzzle #1.
+ *
+ * PLACEHOLDER -- must be finalized before public launch. Changing it after
+ * launch renumbers every puzzle retroactively, which invalidates any score
+ * or result players have already shared.
+ */
+export const LAUNCH_DATE_UTC = '2026-11-01';
 
 const MS_PER_DAY = 86400000;
 

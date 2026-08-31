@@ -16,7 +16,7 @@ const UINT32_RANGE = 4294967296; // 2^32
  * Create an independent RNG stream.
  *
  * @param {number} seed Integer seed. Coerced to a uint32.
- * @returns {{nextUint32: () => number, nextFloat: () => number, nextInt: (min: number, max: number) => number}}
+ * @returns {{nextUint32: () => number, nextFloat: () => number, nextIntExclusive: (min: number, max: number) => number}}
  */
 export function createRng(seed) {
   if (!Number.isFinite(seed) || !Number.isInteger(seed)) {
@@ -41,19 +41,19 @@ export function createRng(seed) {
 
   /**
    * Uniform integer in [min, max) -- min inclusive, max EXCLUSIVE, matching
-   * Array indexing so `nextInt(0, arr.length)` is always in bounds.
+   * Array indexing so `nextIntExclusive(0, arr.length)` is always in bounds.
    *
    * Uses rejection sampling rather than a plain modulo: modulo bias would
    * skew low values for ranges that do not divide 2^32. Rejection is still
    * fully deterministic -- the same seed rejects the same draws.
    */
-  function nextInt(min, max) {
+  function nextIntExclusive(min, max) {
     if (!Number.isInteger(min) || !Number.isInteger(max)) {
-      throw new TypeError(`nextInt: bounds must be integers, got (${min}, ${max})`);
+      throw new TypeError(`nextIntExclusive: bounds must be integers, got (${min}, ${max})`);
     }
     const range = max - min;
     if (range <= 0) {
-      throw new RangeError(`nextInt: max must be greater than min, got (${min}, ${max})`);
+      throw new RangeError(`nextIntExclusive: max must be greater than min, got (${min}, ${max})`);
     }
 
     // Discard the tail that would wrap unevenly under the modulo.
@@ -64,5 +64,5 @@ export function createRng(seed) {
     return min + (draw % range);
   }
 
-  return { nextUint32, nextFloat, nextInt };
+  return { nextUint32, nextFloat, nextIntExclusive };
 }

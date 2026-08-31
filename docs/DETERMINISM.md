@@ -16,7 +16,7 @@ All randomness comes from `createRng(seed)` in `src/rng.js`.
 ```js
 import { createRng } from './rng.js';
 const rng = createRng(seed);
-const roll = rng.nextInt(0, 6);   // 0..5 -- max is EXCLUSIVE
+const roll = rng.nextIntExclusive(0, 6);   // 0..5 -- max is EXCLUSIVE
 const t    = rng.nextFloat();     // [0, 1)
 ```
 
@@ -25,8 +25,8 @@ Never call `Math.random()` in simulation code. Not for a tiebreak, not for a
 cosmetic random number in a shared daily puzzle: anything that consumes a
 draw shifts every subsequent draw.
 
-`nextInt` is half-open (`min` inclusive, `max` exclusive) so that
-`nextInt(0, arr.length)` is always a valid index.
+`nextIntExclusive` is half-open (`min` inclusive, `max` exclusive) so that
+`nextIntExclusive(0, arr.length)` is always a valid index.
 
 **Draw order is part of the seed.** Two calls in a different order give a
 different run. Reordering draws, adding a draw inside a conditional, or
