@@ -10,6 +10,7 @@
 
 import { createRng } from '../src/rng.js';
 import { createLoop, FIXED_STEP_MS } from '../src/loop.js';
+import { createParachuteGame, RUN_STEPS, MAX_MISSES } from '../src/games/parachute.js';
 import {
   dailySeed,
   puzzleNumber,
@@ -198,6 +199,197 @@ check(
   spiralSteps > 0 && spiralSteps <= 15,
   `ran ${spiralSteps} steps`
 );
+
+
+// -----------------------------------------------------------------------
+// Parachute rescue
+// -----------------------------------------------------------------------
+
+/**
+ * A blind input script: a fixed pattern of held directions, derived from its
+ * own seeded RNG so it is a fixed sequence rather than a live reaction.
+ * Two runs given the same script must agree exactly.
+ */
+function recordInputScript(seed, steps) {
+  const rng = createRng(seed);
+  const script = new Array(steps);
+  let held = { left: false, right: false };
+  let holdUntil = 0;
+
+  for (let step = 0; step < steps; step++) {
+    if (step >= holdUntil) {
+      const choice = rng.nextIntExclusive(0, 3);
+      held = { left: choice === 0, right: choice === 1 };
+      holdUntil = step + rng.nextIntExclusive(6, 40);
+    }
+    script[step] = held;
+  }
+  return script;
+}
+
+/**
+ * A reactive policy: steer toward the lowest unresolved parachutist. Reading
+ * state makes input a function of the simulation, which is still fully
+ * deterministic -- and unlike the blind script it reliably scores, so the
+ * test would catch a game that silently stopped registering catches.
+ */
+function chasePolicy(state) {
+  let target = null;
+  for (const p of state.parachutists) {
+    if (p.doomed) continue;
+    if (target === null || p.ySub > target.ySub) target = p;
+  }
+  if (target === null) return { left: false, right: false };
+  const boatCentre = Math.floor(state.boatXSub / 64) + 1;
+  return { left: target.col < boatCentre, right: target.col > boatCentre };
+}
+
+/** Play a full run and return a trace plus the final outcome. */
+function playScripted(seed, script) {
+  const game = createParachuteGame({ seed });
+  const trace = [];
+  for (let step = 0; step < script.length && !game.isOver; step++) {
+    game.update(script[step]);
+    const s = game.state;
+    trace.push(`${s.step}|${s.score}|${s.misses}|${s.boatXSub}|${s.parachutists.map((p) => `${p.id}:${p.col}:${p.ySub}:${p.doomed ? 1 : 0}`).join(';')}`);
+  }
+  return { game, trace: trace.join('\n'), state: game.state };
+}
+
+function playReactive(seed) {
+  const game = createParachuteGame({ seed });
+  const trace = [];
+  while (!game.isOver) {
+    game.update(chasePolicy(game.state));
+    const s = game.state;
+    trace.push(`${s.step}|${s.score}|${s.misses}|${s.boatXSub}`);
+  }
+  return { game, trace: trace.join('\n'), state: game.state };
+}
+
+// Seed 9 gives a script that actually catches parachutists; a script that
+// scores zero would let the final-score assertion below pass on 0 === 0.
+const script = recordInputScript(9, RUN_STEPS);
+
+const scriptedA = playScripted(12345, script);
+const scriptedB = playScripted(12345, script);
+const gameBytesA = Buffer.from(scriptedA.trace, 'utf8');
+const gameBytesB = Buffer.from(scriptedB.trace, 'utf8');
+
+check(
+  'same seed + same input script produces an identical final score',
+  scriptedA.state.score === scriptedB.state.score,
+  `${scriptedA.state.score} vs ${scriptedB.state.score}`
+);
+check(
+  'same seed + same input script produces a byte-identical run',
+  gameBytesA.length === gameBytesB.length && Buffer.compare(gameBytesA, gameBytesB) === 0
+);
+check(
+  'same seed + same input script ends the same way',
+  scriptedA.state.step === scriptedB.state.step &&
+    scriptedA.state.endReason === scriptedB.state.endReason,
+  `${scriptedA.state.step}/${scriptedA.state.endReason} vs ${scriptedB.state.step}/${scriptedB.state.endReason}`
+);
+
+const scriptedOtherSeed = playScripted(12346, script);
+check(
+  'a different seed changes the run',
+  scriptedOtherSeed.trace !== scriptedA.trace
+);
+
+const otherScript = recordInputScript(28, RUN_STEPS);
+check(
+  'a different input script changes the run',
+  playScripted(12345, otherScript).trace !== scriptedA.trace
+);
+
+
+// A golden fingerprint. Unlike the assertions above, which only compare runs
+// to each other, this pins the actual content of a seeded run. It fails if
+// the RNG draw order, the tuning constants or the update order change --
+// each of which silently hands every player a different puzzle. Before
+// launch that is fine: update the numbers. After launch it invalidates
+// results players have already shared, so treat a failure here as a
+// deliberate decision rather than a number to re-baseline.
+const GOLDEN = { seed: 12345, scriptSeed: 9, score: 3, misses: 3, step: 661, endReason: 'misses' };
+const goldenRun = playScripted(GOLDEN.seed, recordInputScript(GOLDEN.scriptSeed, RUN_STEPS)).state;
+check(
+  'seeded run still produces its recorded outcome (golden fingerprint)',
+  goldenRun.score === GOLDEN.score &&
+    goldenRun.misses === GOLDEN.misses &&
+    goldenRun.step === GOLDEN.step &&
+    goldenRun.endReason === GOLDEN.endReason,
+  `got score ${goldenRun.score}, misses ${goldenRun.misses}, step ${goldenRun.step}, ${goldenRun.endReason}`
+);
+
+const reactiveA = playReactive(12345);
+const reactiveB = playReactive(12345);
+check(
+  'a reactive policy replays identically',
+  reactiveA.trace === reactiveB.trace && reactiveA.state.score === reactiveB.state.score
+);
+
+// Guards against the game silently scoring nothing, which would make every
+// determinism assertion above pass on a broken game.
+check(
+  'a competent player actually scores',
+  reactiveA.state.score > 10,
+  `scored ${reactiveA.state.score}`
+);
+
+// Both end conditions must be reachable.
+check(
+  'three misses ends the run early',
+  (() => {
+    const idle = createParachuteGame({ seed: 12345 });
+    while (!idle.isOver) idle.update({ left: false, right: false });
+    return (
+      idle.state.endReason === 'misses' &&
+      idle.state.misses === MAX_MISSES &&
+      idle.state.step < RUN_STEPS
+    );
+  })()
+);
+
+check(
+  'a run that avoids three misses ends on the clock',
+  (() => {
+    // Seed 7 is survivable by the chase policy for the full minute.
+    const timed = playReactive(7);
+    return timed.state.endReason === 'time' && timed.state.step === RUN_STEPS;
+  })(),
+  'seed 7 no longer reaches 60s under the chase policy -- retune or repick the seed'
+);
+
+check(
+  'update after the run has ended is a no-op',
+  (() => {
+    const done = playScripted(12345, script).game;
+    const before = JSON.stringify(done.state);
+    for (let i = 0; i < 100; i++) done.update({ left: true, right: false });
+    return JSON.stringify(done.state) === before;
+  })()
+);
+
+// The game must be driveable through the real loop at any frame rate.
+function playThroughLoop(seed, script, frameMs) {
+  const game = createParachuteGame({ seed });
+  const loop = createLoop({
+    update() {
+      if (game.isOver) return;
+      game.update(script[game.state.step] || { left: false, right: false });
+    },
+  });
+  while (!game.isOver && loop.stepCount < RUN_STEPS + 10) loop.advance(frameMs);
+  return `${game.state.step}|${game.state.score}|${game.state.misses}|${game.state.endReason}`;
+}
+
+const via60 = playThroughLoop(12345, script, FIXED_STEP_MS);
+const via120 = playThroughLoop(12345, script, 1000 / 120);
+const via30 = playThroughLoop(12345, script, 1000 / 30);
+check('the game plays identically at 120Hz and 60Hz', via120 === via60, `${via120} vs ${via60}`);
+check('the game plays identically at 30Hz and 60Hz', via30 === via60, `${via30} vs ${via60}`);
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

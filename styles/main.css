@@ -5,7 +5,6 @@
   --lcd-bg-dim: #08150c;
   --lcd-on: #7dff8a;
   --lcd-ghost: rgba(125, 255, 138, 0.08);
-  --lcd-glow: rgba(125, 255, 138, 0.35);
 }
 
 * {
@@ -36,26 +35,47 @@ body {
 
 .screen {
   /* Fill the viewport, including under iOS browser chrome. */
-  min-height: 100vh;
-  min-height: 100dvh;
+  height: 100vh;
+  height: 100dvh;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: max(1rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right))
-    max(1rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
+  padding: max(0.5rem, env(safe-area-inset-top)) max(0.5rem, env(safe-area-inset-right))
+    max(0.5rem, env(safe-area-inset-bottom)) max(0.5rem, env(safe-area-inset-left));
+}
+
+/* The title is now drawn on the LCD by the game, but the document still
+   needs a heading for assistive tech and for search results. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .lcd {
   position: relative;
-  width: 100%;
+  /* Stretch to fill the viewport; the renderer letterboxes the 24x32 cell
+     grid inside whatever aspect ratio it is given. */
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
   max-width: 34rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 2rem 1rem;
+  margin: 0 auto;
   background: var(--lcd-bg);
   border-radius: 0.375rem;
   box-shadow: inset 0 0 4rem rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+}
+
+.lcd__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* The canvas is the touch surface: its halves are the two controls. */
+  touch-action: none;
 }
 
 /* Faint scanlines, the way a cheap LCD reads up close. */
@@ -70,17 +90,6 @@ body {
     var(--lcd-ghost) 0 1px,
     transparent 1px 3px
   );
-}
-
-.lcd__title {
-  font-size: clamp(1.5rem, 9vw, 3rem);
-  font-weight: 700;
-  letter-spacing: 0.18em;
-  /* Letter-spacing pads the right edge; pull the block back to centered. */
-  text-indent: 0.18em;
-  text-align: center;
-  line-height: 1.3;
-  text-shadow: 0 0 0.75rem var(--lcd-glow);
 }
 
 @media (prefers-reduced-motion: reduce) {

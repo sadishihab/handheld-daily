@@ -16,3 +16,4 @@ Thumbs.db
 # Local env
 .env
 .env.local
+__probe.html
