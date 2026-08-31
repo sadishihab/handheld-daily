@@ -34,10 +34,11 @@ export function createLcdSurface(canvas, { gridWidth, gridHeight }) {
   let originX = 0;
   let originY = 0;
   // Kept in sync with styles/main.css so the panel and the canvas cannot drift.
-  let ink = '#7dff8a';
-  let ground = '#0b1a0f';
-  let ghost = 'rgba(125, 255, 138, 0.08)';
-  let dim = 'rgba(125, 255, 138, 0.45)';
+  // Fallbacks only; the real values come from the stylesheet on resize().
+  let ink = '#14170d';
+  let ground = '#a9b77c';
+  let ghost = 'rgba(20, 23, 13, 0.13)';
+  let dim = 'rgba(20, 23, 13, 0.4)';
 
   /** Recompute geometry. Call on resize and orientation change. */
   function resize() {

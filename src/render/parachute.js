@@ -1,97 +1,215 @@
 /**
- * Parachute renderer -- reads game state, draws it, mutates nothing.
+ * Parachute renderer -- Game & Watch style LCD segments.
  *
- * The renderer is deliberately dumb: every value it draws is already in the
- * state object, and it derives nothing that the simulation would need back.
- * That is what lets the same run be replayed, or run headlessly in the
- * determinism test, with no renderer at all.
+ * Every position an entity can occupy is a fixed segment on the panel, and
+ * all of them are drawn every frame: the inactive ones faintly, the active
+ * ones solid. That is what an LCD actually looks like, and it means the
+ * player can read the whole board -- every lane, every stop, every dock --
+ * at a glance.
  *
- * It ignores the loop's interpolation alpha on purpose. Positions snap to
- * whole cells, so there is nothing to interpolate -- an LCD panel does not
- * show a parachutist halfway between two pixels.
+ * Nothing here is interpolated. Segments are either on or off, and they snap
+ * between positions on logic ticks, so the loop's interpolation alpha is
+ * ignored: there is no such thing as half a lit segment.
+ *
+ * The renderer reads game state and mutates nothing.
  */
 
 import { createLcdSurface } from './lcd.js';
+import { drawDigits, measure, DIGIT_HEIGHT } from './segments.js';
 import {
-  GRID_WIDTH,
-  GRID_HEIGHT,
-  BOAT_ROW,
-  BOAT_WIDTH,
-  WATER_ROW,
+  LANES,
+  STOPS,
+  DOCKS,
+  DECK_STOP,
   MAX_MISSES,
   RUN_STEPS,
 } from '../games/parachute.js';
 
-const SUBCELL = 64;
+/* -- Panel layout. Purely visual: the simulation knows only lane and stop
+      indices, and this is where those become places on the glass. -------- */
+
+export const GRID_WIDTH = 28;
+export const GRID_HEIGHT = 37;
+
+/** Centre column of each lane. Spaced 4 apart so the 3-wide canopies of
+ *  neighbouring lanes never touch, which matters once every one is ghosted. */
+const LANE_COL = [1, 5, 9, 13, 17, 21];
+
+/** Row of each stop. Spaced 3 apart, leaving a clear row between sprites. */
+const STOP_ROW = [13, 16, 19, 22, 25, 28, 31];
+
+const BOAT_CREW_ROW = 30;
+const BOAT_DECK_ROW = 31;
+const SHORELINE_ROW = 32;
+const WATER_TOP_ROW = 33;
+const SPLASH_ROW = 34;
+
+const CLOCK_COL = 0;
+const CLOCK_ROW = 0;
+const SCORE_ROW = 0;
+const MISS_ROW = 5;
+const BAR_ROW = 6;
+
+const SHORE_COL = 24;
 
 export function createParachuteRenderer(canvas) {
   const lcd = createLcdSurface(canvas, { gridWidth: GRID_WIDTH, gridHeight: GRID_HEIGHT });
 
-  function drawParachutist(p) {
-    const row = Math.floor(p.ySub / SUBCELL);
-    if (p.doomed) {
-      // Canopy collapses once it has gone past the boat.
-      lcd.fillCell(p.col, row - 1);
-      lcd.fillCell(p.col, row);
-      return;
+  /** Solid block of cells -- segments are shapes, not dots. */
+  const seg = (col, row, w, h, style) => lcd.fillArea(col, row, w, h, style);
+
+  /* -- entity segments ---------------------------------------------------- */
+
+  function parachutistSegment(lane, stop, style) {
+    const col = LANE_COL[lane];
+    const row = STOP_ROW[stop];
+    seg(col - 1, row - 1, 3, 1, style); // canopy
+    seg(col, row, 1, 1, style); // body
+  }
+
+  function splashSegment(lane, style) {
+    const col = LANE_COL[lane];
+    seg(col - 1, SPLASH_ROW, 1, 1, style);
+    seg(col + 1, SPLASH_ROW, 1, 1, style);
+    seg(col, SPLASH_ROW - 1, 1, 1, style);
+  }
+
+  function boatSegment(dock, style) {
+    const col = LANE_COL[dock];
+    seg(col, BOAT_CREW_ROW, 1, 1, style); // crew
+    seg(col - 1, BOAT_DECK_ROW, 3, 1, style); // hull
+  }
+
+  /**
+   * Every position the board can hold, drawn faintly. This is the whole
+   * effect: an unlit LCD segment is still visible in the glass.
+   */
+  function drawGhostBoard() {
+    const ghost = lcd.colors.ghost;
+    for (let lane = 0; lane < LANES; lane++) {
+      for (let stop = 0; stop < STOPS; stop++) parachutistSegment(lane, stop, ghost);
+      splashSegment(lane, ghost);
     }
-    lcd.fillRow(p.col - 1, row - 2, 3); // canopy
-    lcd.fillCell(p.col, row - 1); // lines
-    lcd.fillCell(p.col, row); // body
+    for (let dock = 0; dock < DOCKS; dock++) boatSegment(dock, ghost);
   }
 
-  function drawBoat(state) {
-    const col = Math.floor(state.boatXSub / SUBCELL);
-    lcd.fillCell(col + 1, BOAT_ROW - 1); // crew
-    lcd.fillRow(col, BOAT_ROW, BOAT_WIDTH); // hull
+  /* -- painted background ------------------------------------------------- */
+
+  /** The crashed plane and its smoke. Static line art, always lit. */
+  function drawPlane() {
+    const ink = lcd.colors.ink;
+    // Nose-down fuselage with a wing, roughly cols 3-12, rows 8-11.
+    seg(10, 8, 2, 1, ink); // tail fin
+    seg(6, 9, 6, 1, ink); // upper fuselage
+    seg(4, 10, 7, 1, ink); // lower fuselage
+    seg(3, 11, 3, 1, ink); // nose
+    seg(8, 11, 2, 1, ink); // wing
+
+    // Smoke: detached puffs rising to the right, drawn dim so they read as
+    // background rather than as something the player must track.
+    const dim = lcd.colors.dim;
+    seg(13, 10, 2, 1, dim);
+    seg(15, 9, 2, 1, dim);
+    seg(14, 8, 1, 1, dim);
+    seg(17, 8, 2, 1, dim);
+    seg(16, 7, 1, 1, dim);
+    seg(19, 7, 1, 1, dim);
   }
 
+  /** Palm trees and sand along the right-hand shore. */
+  function drawShore() {
+    const ink = lcd.colors.ink;
+
+    // Tall palm.
+    seg(SHORE_COL + 1, 26, 1, 6, ink); // trunk
+    seg(SHORE_COL - 1, 25, 2, 1, ink); // left fronds
+    seg(SHORE_COL + 2, 25, 2, 1, ink); // right fronds
+    seg(SHORE_COL + 1, 24, 1, 1, ink); // crown
+
+    // Short palm behind it.
+    seg(SHORE_COL + 3, 28, 1, 4, ink);
+    seg(SHORE_COL + 2, 27, 1, 1, ink);
+    seg(SHORE_COL + 3, 27, 2, 1, ink);
+
+    // Sand.
+    seg(SHORE_COL - 1, SHORELINE_ROW, GRID_WIDTH - SHORE_COL + 1, 1, ink);
+    for (let row = WATER_TOP_ROW; row < GRID_HEIGHT; row++) {
+      seg(SHORE_COL + (row % 2), row, 2, 1, lcd.colors.dim);
+    }
+  }
+
+  /** Is this cell part of a lane's splash segment? */
+  function isSplashCell(col, row) {
+    if (row !== SPLASH_ROW && row !== SPLASH_ROW - 1) return false;
+    for (let lane = 0; lane < LANES; lane++) {
+      const c = LANE_COL[lane];
+      if (row === SPLASH_ROW && (col === c - 1 || col === c + 1)) return true;
+      if (row === SPLASH_ROW - 1 && col === c) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Water. The two-phase wave is driven by the simulated step count, not the
+   * wall clock, so a replay of a seed shows identical water.
+   *
+   * Cells belonging to a splash segment are left clear. Otherwise the wave
+   * would light the same cells a splash uses, and on half the phases an
+   * ordinary wave would be indistinguishable from a parachutist hitting the
+   * sea -- the one event the player must not misread.
+   */
   function drawWater(state) {
-    // Wave phase advances with simulated steps, not wall-clock, so the water
-    // animates identically in a replay. Still render-only -- nothing reads it.
-    const phase = Math.floor(state.step / 12);
-    for (let row = WATER_ROW; row < GRID_HEIGHT; row++) {
-      for (let col = 0; col < GRID_WIDTH; col++) {
-        if ((col + phase + row * 2) % 4 === 0) lcd.fillCell(col, row);
+    const phase = Math.floor(state.step / 20) % 2;
+    for (let row = WATER_TOP_ROW; row < GRID_HEIGHT; row++) {
+      const style = row % 2 === 0 ? lcd.colors.ink : lcd.colors.dim;
+      for (let col = 0; col < SHORE_COL - 1; col++) {
+        const lit = Math.floor((col + (phase + row) * 2) / 2) % 2 === 0;
+        if (!lit || isSplashCell(col, row)) continue;
+        seg(col, row, 1, 1, style);
       }
     }
   }
 
-  function drawReadout(state) {
-    lcd.drawText(String(state.score).padStart(3, '0'), 0, 0, { scale: 2.2 });
+  /* -- readout ------------------------------------------------------------ */
 
-    // Misses as pips, filled for lives spent.
-    for (let i = 0; i < MAX_MISSES; i++) {
-      const col = GRID_WIDTH - 1 - (MAX_MISSES - 1 - i) * 2;
-      if (i < state.misses) {
-        lcd.fillCell(col, 0);
-        lcd.fillCell(col, 1);
-      } else {
-        lcd.fillCell(col, 1);
-      }
+  function drawReadout(state, view) {
+    const on = lcd.colors.ink;
+    const off = lcd.colors.ghost;
+
+    // Clock, top left, the way every handheld of the era did it.
+    if (view.clock) {
+      drawDigits(lcd, view.clock, CLOCK_COL, CLOCK_ROW, {
+        on,
+        off,
+        colonOn: view.colonOn !== false,
+      });
     }
 
-    // Time remaining as a bar on row 2.
+    // Score, top right, right-aligned so it grows leftwards.
+    const score = String(Math.min(999, state.score)).padStart(2, '0');
+    const scoreWidth = measure(score);
+    drawDigits(lcd, score, GRID_WIDTH - scoreWidth, SCORE_ROW, { on, off });
+
+    // Miss markers: three fixed segments, lit as they are spent.
+    for (let i = 0; i < MAX_MISSES; i++) {
+      const col = GRID_WIDTH - 2 - (MAX_MISSES - 1 - i) * 3;
+      seg(col, MISS_ROW, 2, 1, i < state.misses ? on : off);
+    }
+
+    // Time bar: every cell drawn, lit ones showing time left.
     const remaining = Math.max(0, RUN_STEPS - state.step);
-    const width = Math.ceil((remaining * GRID_WIDTH) / RUN_STEPS);
-    lcd.fillRow(0, 2, width, lcd.colors.ghost);
-    for (let col = 0; col < width; col += 2) lcd.fillCell(col, 2);
+    const lit = Math.ceil((remaining * GRID_WIDTH) / RUN_STEPS);
+    for (let col = 0; col < GRID_WIDTH; col++) {
+      seg(col, BAR_ROW, 1, 1, col < lit ? on : off);
+    }
   }
 
   function drawEndOverlay(state) {
     const label = state.endReason === 'time' ? 'TIME UP' : 'GAME OVER';
-    lcd.drawText(label, GRID_WIDTH / 2, Math.floor(GRID_HEIGHT / 2) - 3, {
+    lcd.drawText(label, GRID_WIDTH / 2, Math.floor(GRID_HEIGHT / 2) - 2, {
       align: 'center',
-      scale: 2.4,
-    });
-    lcd.drawText(`SCORE ${state.score}`, GRID_WIDTH / 2, Math.floor(GRID_HEIGHT / 2) + 1, {
-      align: 'center',
-      scale: 1.8,
-    });
-    lcd.drawText('TAP TO RETRY', GRID_WIDTH / 2, Math.floor(GRID_HEIGHT / 2) + 5, {
-      align: 'center',
-      scale: 1.2,
-      style: lcd.colors.ghost,
+      scale: 2.2,
+      style: lcd.colors.ink,
     });
   }
 
@@ -99,20 +217,26 @@ export function createParachuteRenderer(canvas) {
     resize: lcd.resize,
     /**
      * @param {object} state Live game state. Read only.
-     * @param {{badge?: string|null}} [view] Chrome that is not part of the
-     *   simulation -- currently the PRACTICE label.
+     * @param {{badge?: string|null, clock?: string, colonOn?: boolean}} [view]
+     *   Chrome that is not part of the simulation.
      */
     draw(state, view = {}) {
       lcd.clear();
-      drawReadout(state);
-      drawWater(state);
-      drawBoat(state);
-      for (const p of state.parachutists) drawParachutist(p);
 
-      // Drawn after the scene, over a cleared strip along the bottom. Not the
-      // readout row: that already carries the score on the left and the miss
-      // pips on the right, and a label between them reads as a collision on a
-      // narrow screen.
+      drawGhostBoard();
+      drawPlane();
+      drawShore();
+      drawWater(state);
+      drawReadout(state, view);
+
+      // Lit entities, over their own ghosts.
+      const ink = lcd.colors.ink;
+      boatSegment(state.boatDock, ink);
+      for (const p of state.parachutists) {
+        if (p.doomed && p.stop >= DECK_STOP) splashSegment(p.lane, ink);
+        else parachutistSegment(p.lane, p.stop, ink);
+      }
+
       if (view.badge) {
         lcd.fillArea(0, GRID_HEIGHT - 1, GRID_WIDTH, 1, lcd.colors.ground);
         lcd.drawText(view.badge, GRID_WIDTH / 2, GRID_HEIGHT - 1, {
@@ -122,8 +246,8 @@ export function createParachuteRenderer(canvas) {
         });
       }
 
-      // Flash on the frames right after a splash. Blinks rather than holds,
-      // which is how a real segment display signals a fault.
+      // A miss blinks the whole panel, the way a segment display signals a
+      // fault. Hard on/off -- no fade.
       if (state.missFlash > 0 && state.missFlash % 6 >= 3) {
         lcd.flood(lcd.colors.ghost);
       }

@@ -10,7 +10,15 @@
 
 import { createRng } from '../src/rng.js';
 import { createLoop, FIXED_STEP_MS } from '../src/loop.js';
-import { createParachuteGame, RUN_STEPS, MAX_MISSES } from '../src/games/parachute.js';
+import {
+  createParachuteGame,
+  RUN_STEPS,
+  MAX_MISSES,
+  LANES,
+  STOPS,
+  DOCKS,
+  SPLASH_STOP,
+} from '../src/games/parachute.js';
 import {
   dailySeed,
   puzzleNumber,
@@ -237,11 +245,10 @@ function chasePolicy(state) {
   let target = null;
   for (const p of state.parachutists) {
     if (p.doomed) continue;
-    if (target === null || p.ySub > target.ySub) target = p;
+    if (target === null || p.stop > target.stop) target = p;
   }
   if (target === null) return { left: false, right: false };
-  const boatCentre = Math.floor(state.boatXSub / 64) + 1;
-  return { left: target.col < boatCentre, right: target.col > boatCentre };
+  return { left: target.lane < state.boatDock, right: target.lane > state.boatDock };
 }
 
 /** Play a full run and return a trace plus the final outcome. */
@@ -251,7 +258,7 @@ function playScripted(seed, script) {
   for (let step = 0; step < script.length && !game.isOver; step++) {
     game.update(script[step]);
     const s = game.state;
-    trace.push(`${s.step}|${s.score}|${s.misses}|${s.boatXSub}|${s.parachutists.map((p) => `${p.id}:${p.col}:${p.ySub}:${p.doomed ? 1 : 0}`).join(';')}`);
+    trace.push(`${s.step}|${s.score}|${s.misses}|${s.boatDock}|${s.parachutists.map((p) => `${p.id}:${p.lane}:${p.stop}:${p.doomed ? 1 : 0}`).join(';')}`);
   }
   return { game, trace: trace.join('\n'), state: game.state };
 }
@@ -262,14 +269,14 @@ function playReactive(seed) {
   while (!game.isOver) {
     game.update(chasePolicy(game.state));
     const s = game.state;
-    trace.push(`${s.step}|${s.score}|${s.misses}|${s.boatXSub}`);
+    trace.push(`${s.step}|${s.score}|${s.misses}|${s.boatDock}`);
   }
   return { game, trace: trace.join('\n'), state: game.state };
 }
 
-// Seed 9 gives a script that actually catches parachutists; a script that
+// Seed 109 gives a script that actually catches parachutists; a script that
 // scores zero would let the final-score assertion below pass on 0 === 0.
-const script = recordInputScript(9, RUN_STEPS);
+const script = recordInputScript(109, RUN_STEPS);
 
 const scriptedA = playScripted(12345, script);
 const scriptedB = playScripted(12345, script);
@@ -298,7 +305,7 @@ check(
   scriptedOtherSeed.trace !== scriptedA.trace
 );
 
-const otherScript = recordInputScript(28, RUN_STEPS);
+const otherScript = recordInputScript(6, RUN_STEPS);
 check(
   'a different input script changes the run',
   playScripted(12345, otherScript).trace !== scriptedA.trace
@@ -312,7 +319,13 @@ check(
 // launch that is fine: update the numbers. After launch it invalidates
 // results players have already shared, so treat a failure here as a
 // deliberate decision rather than a number to re-baseline.
-const GOLDEN = { seed: 12345, scriptSeed: 9, score: 3, misses: 3, step: 661, endReason: 'misses' };
+//
+// Re-baselined when positions became discrete LCD segments (lanes and stops
+// instead of columns and fixed-point rows). That change altered the RNG draw
+// ranges and the difficulty tuning, so every seeded run is different from the
+// pre-segment build by design. The game is still unreleased, so no shared
+// result was invalidated.
+const GOLDEN = { seed: 12345, scriptSeed: 109, score: 4, misses: 3, step: 787, endReason: 'misses' };
 const goldenRun = playScripted(GOLDEN.seed, recordInputScript(GOLDEN.scriptSeed, RUN_STEPS)).state;
 check(
   'seeded run still produces its recorded outcome (golden fingerprint)',
@@ -321,6 +334,41 @@ check(
     goldenRun.step === GOLDEN.step &&
     goldenRun.endReason === GOLDEN.endReason,
   `got score ${goldenRun.score}, misses ${goldenRun.misses}, step ${goldenRun.step}, ${goldenRun.endReason}`
+);
+
+// Positions are discrete LCD segments: small integers, never between cells.
+// This is the strongest form of the "prefer integers" rule -- with no
+// fixed-point and no floats anywhere in a position, there is nothing left to
+// accumulate rounding error over a long run.
+{
+  const game = createParachuteGame({ seed: 12345 });
+  let allIntegers = true;
+  let allInRange = true;
+  let boatInRange = true;
+
+  while (!game.isOver) {
+    game.update(chasePolicy(game.state));
+    const s = game.state;
+
+    if (!Number.isInteger(s.boatDock)) allIntegers = false;
+    if (s.boatDock < 0 || s.boatDock >= DOCKS) boatInRange = false;
+
+    for (const p of s.parachutists) {
+      if (!Number.isInteger(p.lane) || !Number.isInteger(p.stop)) allIntegers = false;
+      if (p.lane < 0 || p.lane >= LANES) allInRange = false;
+      if (p.stop < 0 || p.stop > SPLASH_STOP) allInRange = false;
+    }
+  }
+
+  check('every position is an integer', allIntegers);
+  check('every parachutist sits on a real lane and stop', allInRange);
+  check('the boat sits on a real dock', boatInRange);
+}
+
+check(
+  'the layout is a small fixed set of segments',
+  Number.isInteger(LANES) && Number.isInteger(STOPS) && DOCKS === LANES && STOPS > 1,
+  `${LANES} lanes, ${STOPS} stops, ${DOCKS} docks`
 );
 
 const reactiveA = playReactive(12345);

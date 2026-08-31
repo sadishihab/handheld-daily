@@ -1,96 +1,98 @@
 /**
  * Parachute rescue -- pure simulation, no rendering and no input handling.
  *
- * Parachutists drift down toward the water; a boat slides along the bottom.
- * Catch one to score, let one hit the water for a miss. Three misses or
- * sixty seconds ends the run.
+ * Positions are discrete LCD segments, the way a Game & Watch panel works.
+ * A parachutist is always at exactly one (lane, stop) segment and never
+ * between two; the boat sits at exactly one of a few docks. There are no
+ * continuous coordinates and no fixed-point arithmetic anywhere -- every
+ * position in this module is a small integer, which is the strongest form of
+ * the "prefer integers" rule in docs/DETERMINISM.md.
  *
- * Nothing in this module touches the DOM, the clock, or Math.random(). The
- * only inputs are the seed handed to createParachuteGame() and the
- * {left, right} snapshot handed to update() each step, which is exactly what
- * makes a run reproducible. See docs/DETERMINISM.md.
+ * Parachutists drift down toward the water; the boat slides along the docks.
+ * Catch one to score, let one hit the water for a miss. Three misses or sixty
+ * seconds ends the run.
  *
- * Positions are integers throughout. Vertical position is fixed-point in
- * SUBCELL units per grid cell rather than a float, so a long run cannot
- * accumulate rounding error.
+ * Nothing here touches the DOM, the clock, or Math.random(). The only inputs
+ * are the seed and the {left, right} snapshot handed to update() each step.
  */
 
 import { createRng } from '../rng.js';
 import { STEPS_PER_SECOND } from '../loop.js';
 
-/** Playfield dimensions, in cells. The renderer scales this to the screen. */
-export const GRID_WIDTH = 24;
-export const GRID_HEIGHT = 32;
+/**
+ * Drop lanes, left to right.
+ *
+ * Six rather than a handful: with four, the boat could always reach any lane
+ * before a parachutist landed, and a greedy player never missed. Six makes a
+ * full-width traverse (~1.3s) comparable to a late-game fall (~1.7s), so
+ * lanes at opposite edges become a genuine choice.
+ */
+export const LANES = 6;
 
-/** Fixed-point resolution: sub-units per cell. A power of two, so the
- *  division back to a cell index is exact. */
-const SUBCELL = 64;
+/**
+ * Vertical segment positions in a lane, top to bottom. A parachutist spawns
+ * at stop 0 and advances one stop at a time.
+ */
+export const STOPS = 7;
+
+/** The lowest stop: deck height, where a catch is resolved. */
+export const DECK_STOP = STOPS - 1;
+
+/** One past the deck: in the water. Reached only by an uncaught parachutist. */
+export const SPLASH_STOP = STOPS;
+
+/** Docks the boat can occupy, aligned one-to-one with the lanes. */
+export const DOCKS = LANES;
 
 export const RUN_SECONDS = 60;
 export const RUN_STEPS = RUN_SECONDS * STEPS_PER_SECOND;
 export const MAX_MISSES = 3;
 
-/** Row layout. Rows 0-1 are the readout, 3 is the drop line. */
-export const READOUT_ROW = 0;
-export const SKY_TOP_ROW = 3;
-export const BOAT_ROW = GRID_HEIGHT - 5;
-export const WATER_ROW = GRID_HEIGHT - 3;
-
-export const BOAT_WIDTH = 3;
-/**
- * Sub-units per step -- ~1.4s to cross the full screen. Tuned against the
- * fall speed: the boat must be able to cross from one edge to the other in
- * comfortably less time than a parachutist takes to fall, or back-to-back
- * spawns in opposite corners are unwinnable rather than merely hard.
- */
-const BOAT_SPEED_SUB = 16;
-
-/** Fall speed ramps over the run, in sub-units per step. */
-const FALL_SPEED_START = 6;
-const FALL_SPEED_END = 15;
+/** Steps between one stop and the next, ramping down over the run. */
+const FALL_INTERVAL_START = 46;
+const FALL_INTERVAL_END = 17;
 
 /** Steps between spawns, ramping down over the run. */
 const SPAWN_INTERVAL_START = 84;
-const SPAWN_INTERVAL_END = 40;
+const SPAWN_INTERVAL_END = 34;
 const SPAWN_INTERVAL_MIN = 24;
 const SPAWN_JITTER = 8;
 const FIRST_SPAWN_STEP = 30;
 
-/** A parachutist shifts one column every this many steps, if it sways. */
-const SWAY_PERIOD = 22;
-/** Two of four draws mean "no sway", so most fall straight. */
+/**
+ * Steps the boat takes to move one dock. Tuned against the late-game fall
+ * interval so that crossing the board costs most of a parachutist's descent.
+ */
+const BOAT_MOVE_INTERVAL = 16;
+
+/** The single stop at which a drifting parachutist changes lane. */
+const SWAY_AT_STOP = 3;
+/** Two of four draws mean "no drift", so most fall straight down. */
 const SWAY_CHOICES = [-1, 0, 0, 1];
 
-/** How long the screen flashes after a miss, in steps. Cosmetic but
- *  simulated, so it stays identical across devices. */
+/** How long the panel flashes after a splash, in steps. */
 const MISS_FLASH_STEPS = 12;
 
 function clamp(value, min, max) {
   return value < min ? min : value > max ? max : value;
 }
 
-/**
- * Linear ramp between two integers across the run, in integer arithmetic.
- * Floor keeps this exact; no float accumulates from step to step.
- */
+/** Linear ramp between two integers across the run, in integer arithmetic. */
 function ramp(from, to, step) {
   const t = clamp(step, 0, RUN_STEPS);
   return from + Math.floor(((to - from) * t) / RUN_STEPS);
 }
 
 /**
- * Create a run.
- *
  * @param {object} options
  * @param {number} options.seed Integer seed, normally from daily.js.
- * @returns Game instance. `state` is live and read-only to callers -- the
- *   renderer reads it every frame and must never write to it.
  */
 export function createParachuteGame({ seed } = {}) {
   const rng = createRng(seed);
 
   let nextId = 1;
   let nextSpawnStep = FIRST_SPAWN_STEP;
+  let nextBoatMoveStep = 0;
 
   const state = {
     /** 'playing' | 'ended' */
@@ -101,30 +103,29 @@ export function createParachuteGame({ seed } = {}) {
     step: 0,
     score: 0,
     misses: 0,
-    /** Boat position, fixed-point, left edge. */
-    boatXSub: Math.floor(((GRID_WIDTH - BOAT_WIDTH) * SUBCELL) / 2),
+    /** Which dock the boat occupies, 0 .. DOCKS-1. */
+    boatDock: Math.floor((DOCKS - 1) / 2),
     /** Live parachutists, oldest first. */
     parachutists: [],
     missFlash: 0,
   };
 
-  const boatMaxSub = (GRID_WIDTH - BOAT_WIDTH) * SUBCELL;
-
   function spawn() {
-    // Draw order is part of the seed: column, then sway. Never reorder these
+    // Draw order is part of the seed: lane, then drift. Never reorder these
     // or add a draw between them without accepting that every seeded run
-    // changes.
-    const col = rng.nextIntExclusive(1, GRID_WIDTH - 1);
+    // changes. See the golden fingerprint in test/determinism.test.js.
+    const lane = rng.nextIntExclusive(0, LANES);
     const swayDir = SWAY_CHOICES[rng.nextIntExclusive(0, SWAY_CHOICES.length)];
 
     state.parachutists.push({
       id: nextId++,
-      col,
-      ySub: SKY_TOP_ROW * SUBCELL,
+      lane,
+      stop: 0,
       swayDir,
       spawnStep: state.step,
-      /** Set once it has passed the boat uncaught -- it is falling to water. */
+      /** Set once it has passed the deck uncaught -- it is falling to water. */
       doomed: false,
+      nextMoveStep: state.step + ramp(FALL_INTERVAL_START, FALL_INTERVAL_END, state.step),
     });
   }
 
@@ -146,9 +147,17 @@ export function createParachuteGame({ seed } = {}) {
     const right = Boolean(input && input.right);
 
     // 1. Boat. Both halves held cancel out, which is what a player expects.
+    //    Moving first means an input on this step counts toward a catch
+    //    resolved on this step -- the last-instant save stays possible.
     const direction = (right ? 1 : 0) - (left ? 1 : 0);
-    if (direction !== 0) {
-      state.boatXSub = clamp(state.boatXSub + direction * BOAT_SPEED_SUB, 0, boatMaxSub);
+    if (direction !== 0 && state.step >= nextBoatMoveStep) {
+      const target = clamp(state.boatDock + direction, 0, DOCKS - 1);
+      // Only start the cooldown on an actual move, so holding against the
+      // end dock does not stall the boat when the player reverses.
+      if (target !== state.boatDock) {
+        state.boatDock = target;
+        nextBoatMoveStep = state.step + BOAT_MOVE_INTERVAL;
+      }
     }
 
     // 2. Spawning.
@@ -157,36 +166,34 @@ export function createParachuteGame({ seed } = {}) {
       scheduleNextSpawn();
     }
 
-    // 3. Parachutists. Compaction in place, preserving order, so the
-    //    iteration order can never depend on how the engine reclaims memory.
-    const fallSpeed = ramp(FALL_SPEED_START, FALL_SPEED_END, state.step);
-    const boatCol = Math.floor(state.boatXSub / SUBCELL);
+    // 3. Parachutists. Compaction in place, preserving order, so iteration
+    //    order can never depend on how the engine reclaims memory.
+    const fallInterval = ramp(FALL_INTERVAL_START, FALL_INTERVAL_END, state.step);
     const list = state.parachutists;
     let write = 0;
 
     for (let read = 0; read < list.length; read++) {
       const p = list[read];
-      p.ySub += fallSpeed;
 
-      if (!p.doomed && p.swayDir !== 0 && (state.step - p.spawnStep) % SWAY_PERIOD === 0) {
-        p.col = clamp(p.col + p.swayDir, 1, GRID_WIDTH - 2);
-      }
+      if (state.step >= p.nextMoveStep) {
+        p.stop += 1;
+        p.nextMoveStep = state.step + fallInterval;
 
-      const row = Math.floor(p.ySub / SUBCELL);
-
-      // Resolve once, on the way past the boat's deck.
-      if (!p.doomed && row >= BOAT_ROW) {
-        if (p.col >= boatCol && p.col < boatCol + BOAT_WIDTH) {
-          state.score += 1;
-          continue; // caught -- drop from the list
+        if (p.stop === SWAY_AT_STOP && p.swayDir !== 0) {
+          p.lane = clamp(p.lane + p.swayDir, 0, LANES - 1);
         }
-        p.doomed = true;
-      }
 
-      if (row >= WATER_ROW) {
-        state.misses += 1;
-        state.missFlash = MISS_FLASH_STEPS;
-        continue; // splashed -- drop from the list
+        if (p.stop === DECK_STOP) {
+          if (state.boatDock === p.lane) {
+            state.score += 1;
+            continue; // caught -- drop from the list
+          }
+          p.doomed = true;
+        } else if (p.stop >= SPLASH_STOP) {
+          state.misses += 1;
+          state.missFlash = MISS_FLASH_STEPS;
+          continue; // splashed -- drop from the list
+        }
       }
 
       list[write++] = p;

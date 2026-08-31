@@ -1,12 +1,17 @@
 /* Handheld Daily — retro LCD screen */
 
 :root {
-  --lcd-bg: #0b1a0f;
-  --lcd-bg-dim: #08150c;
-  --lcd-on: #7dff8a;
-  --lcd-ghost: rgba(125, 255, 138, 0.08);
-  /* Legible but clearly secondary -- ghost is too faint for text. */
-  --lcd-dim: rgba(125, 255, 138, 0.45);
+  /* Game & Watch panel: dark segments on pale yellow-green glass, inside a
+     dark plastic case. Not backlit green-on-black -- these displays are
+     reflective, so the lit state is the dark one. */
+  --lcd-bg: #a9b77c;
+  --lcd-bg-dim: #2b2e26;
+  /* "on" is a lit (i.e. darkened) segment. */
+  --lcd-on: #14170d;
+  /* An unlit segment, still faintly visible in the glass. */
+  --lcd-ghost: rgba(20, 23, 13, 0.13);
+  /* Background line art: present but clearly not an entity to track. */
+  --lcd-dim: rgba(20, 23, 13, 0.4);
 }
 
 * {
@@ -102,7 +107,7 @@ body {
   border-radius: inherit;
   background: repeating-linear-gradient(
     to bottom,
-    var(--lcd-ghost) 0 1px,
+    rgba(20, 23, 13, 0.07) 0 1px,
     transparent 1px 3px
   );
 }
@@ -146,7 +151,6 @@ body {
   font-weight: 700;
   letter-spacing: 0.14em;
   text-indent: 0.14em;
-  text-shadow: 0 0 0.75rem rgba(125, 255, 138, 0.35);
 }
 
 .panel__stats {

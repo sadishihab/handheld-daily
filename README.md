@@ -1,8 +1,14 @@
 # Handheld Daily
 
-A daily mobile game styled as a retro LCD handheld: monochrome green on a
-dark screen, everything snapped to a coarse cell grid. Everyone gets the same
-puzzle each UTC day.
+A daily mobile game drawn as a Game & Watch LCD panel: dark segments on pale
+green glass, hard on/off, no smooth motion. Everyone gets the same puzzle each
+UTC day.
+
+Entities occupy fixed segment positions rather than continuous coordinates. A
+parachutist is always at exactly one (lane, stop); the boat sits at exactly
+one dock. Every position the board can hold is drawn faintly at all times, the
+way an unlit LCD segment stays visible in the glass, so the player reads the
+whole board at a glance.
 
 **Parachute rescue** -- parachutists drift down toward the water and a boat
 runs along the bottom. Catch one to score, let one hit the water for a miss.
@@ -29,13 +35,15 @@ src/share.js               share text formatting + Web Share / clipboard deliver
 src/devtime.js             dev-only clock override for testing the rollover
 src/countdown.js           hh:mm:ss formatting
 src/games/parachute.js     parachute rescue -- pure simulation, no DOM
-src/render/lcd.js          dot-matrix LCD surface shared by every game renderer
+src/render/lcd.js          LCD surface shared by every game renderer
+src/render/segments.js     seven-segment digits drawn on the cell grid
 src/render/parachute.js    draws parachute state; reads state, never mutates it
 src/ui/panel.js            start / result / practice overlay
 styles/main.css            LCD panel styling
 test/determinism.test.js   determinism suite
 test/progress.test.js      streaks, daily lockout, share text, dev clock
 test/styles.test.js        cascade rules the UI depends on
+test/render.test.js        segment layout, ghost board, painted-art collisions
 test/flow.test.js          end-to-end ritual against a mini-DOM
 test/minidom.js            the mini-DOM the flow test boots the app in
 docs/DETERMINISM.md        rules simulation code must follow
@@ -107,6 +115,10 @@ Runs three suites with Node -- no framework, no `npm install` needed.
   and the dev clock is refused off a dev host.
 - `styles.test.js` -- asserts the cascade rules the UI depends on, chiefly that
   `[hidden]` beats the author `display` rules that would otherwise defeat it.
+- `render.test.js` -- drives the renderer against a recording canvas: every
+  segment snaps to a whole cell, every position on the board is ghosted, lit
+  entities land on their own segments, and painted background art never
+  occupies a cell an entity can use.
 - `flow.test.js` -- boots the real `src/main.js` against a mini-DOM and walks
   the whole ritual: play, lock out, roll over to the next day, share, practice.
 

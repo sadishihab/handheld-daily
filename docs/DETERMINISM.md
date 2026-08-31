@@ -48,6 +48,12 @@ Inside simulation code: no `Date.now()`, no `new Date()`, no
 counts steps -- the loop hands `update()` a monotonic integer step index, and
 60 steps is one simulated second.
 
+The panel clock is the exception that proves the rule. It shows real local
+time, but the renderer never reads a clock: the shell formats it and passes it
+into `draw()` as a string, alongside the practice badge, in a `view` argument
+that is explicitly chrome. Nothing in `view` can reach game state, so the
+clock cannot influence a run.
+
 ```js
 // wrong -- real time leaks in, and the run stops being reproducible
 if (Date.now() - startedAt > 5000) expire();
@@ -89,6 +95,13 @@ the classic way two devices drift apart over a long run.
 Keep anything that must match exactly in integers: positions on a grid,
 scores, counters, timers measured in steps, RNG state. Use fixed-point
 (store hundredths as an integer) before reaching for a float accumulator.
+
+Parachute takes this as far as it goes: an entity's position is not a
+coordinate at all but an index into a fixed set of LCD segments -- a lane and
+a stop, a dock. There is no fixed-point left to round and nothing to
+accumulate, and the renderer cannot draw an entity anywhere the simulation
+cannot put one. A new minigame should reach for the same shape before it
+reaches for coordinates.
 
 Floats are fine for values that are computed fresh each step rather than
 accumulated, and fine anywhere in render code.
