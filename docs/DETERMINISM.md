@@ -125,6 +125,29 @@ npm test
 seed and asserts the output is byte-identical across repeat runs, across
 60/120/30Hz frame pacing, and across deliberately jittery frame times. It also
 asserts different seeds diverge, that daily seeds depend on the UTC day and
-nothing else, and that the backgrounded-tab clamp holds.
+nothing else, and that the backgrounded-tab clamp holds. It then plays full
+parachute runs from a fixed seed and a recorded input script and asserts the
+same seed plus the same inputs gives the same score, the same trace and the
+same ending.
 
 Add a case to it whenever you add a system that could drift.
+
+### The golden fingerprint
+
+Most of the suite compares two runs of the *same* build to each other. That
+catches nondeterminism, but it cannot catch a change that is perfectly
+deterministic and still hands every player a different puzzle -- reordering
+two RNG draws, retuning a spawn interval, reordering the update phases. Both
+runs simply change together and agree.
+
+So one assertion pins the actual outcome of a known seed against recorded
+numbers:
+
+```js
+const GOLDEN = { seed: 12345, scriptSeed: 9, score: 3, misses: 3, step: 661, endReason: 'misses' };
+```
+
+Before launch, a failure here just means updating the numbers. After launch it
+means today's puzzle no longer matches the one players already played and
+shared, so treat it as a decision to make deliberately rather than a stale
+value to re-baseline.
