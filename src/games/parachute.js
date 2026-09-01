@@ -38,12 +38,23 @@ export const DECK_STOP = STOPS - 1;
 export const SPLASH_STOP = STOPS;
 
 /**
- * Boat positions. 0 .. LANES-1 sit under the drop lanes; the last one is the
- * shore, past the final lane, where survivors are unloaded. The boat cannot
- * catch anything from the shore -- that is the cost of the trip.
+ * Open-water docks between the last lane and the shore.
+ *
+ * The boat can neither catch nor be reached by a shark while crossing them,
+ * so they are pure travel -- the price of an unload, paid in distance rather
+ * than in standing still. Two of them, chosen against a shortened unload so
+ * the whole errand keeps costing what it did: see UNLOAD_STEPS.
  */
-export const SHORE_DOCK = LANES;
-export const DOCK_COUNT = LANES + 1;
+export const SHORE_GAP = 2;
+
+/**
+ * Boat positions. 0 .. LANES-1 sit under the drop lanes, then SHORE_GAP
+ * stretches of open water, then the shore, where survivors are unloaded. The
+ * boat cannot catch anything from the crossing or the shore -- that is the
+ * cost of the trip.
+ */
+export const SHORE_DOCK = LANES + SHORE_GAP;
+export const DOCK_COUNT = SHORE_DOCK + 1;
 
 /** Survivors the boat can hold. */
 export const CAPACITY = 4;
@@ -56,8 +67,28 @@ export const MAX_MISSES = 4;
 export const POINTS_PER_RESCUE = 10;
 export const FULL_BOAT_BONUS = 20;
 
-/** Steps spent unloading at the shore. The boat is locked while it runs. */
-const UNLOAD_STEPS = 75;
+/**
+ * Steps spent unloading at the shore. The boat is locked while it runs.
+ *
+ * Was 75 -- 1.25s of locked boat, more than twice the ~35 steps of travel
+ * that earned it -- and it playtested as dead time rather than tension. Cut
+ * to 50 and paid for with SHORE_GAP, so the errand still costs about what it
+ * did (~113 steps from mid-lanes against ~110 before) while the share of it
+ * spent sitting still drops from 68% to 44%.
+ *
+ * Measured over 60 tuning seeds and a 120-seed holdout, against a competent
+ * greedy AI, the pair lands on the previous balance: share of losses coming
+ * from the errand 42% (was 42%), misses per run on the errand 1.47 (1.47)
+ * against 2.07 chasing (2.07), 68% of runs ending on misses (63%), average
+ * run 54.9s (55.2s). Time with the boat off station and motionless falls
+ * from 16% of a run to 9%.
+ *
+ * Cutting further without widening the gap collapses the loop: at 50 steps
+ * and no gap only 3% of runs end on misses and ferrying survivors one at a
+ * time beats filling the boat, which throws away the decision the game is
+ * about. Shorten this only alongside SHORE_GAP.
+ */
+const UNLOAD_STEPS = 50;
 
 /** Steps the boat takes to move one dock. */
 const BOAT_MOVE_INTERVAL = 7;

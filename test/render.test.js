@@ -9,7 +9,14 @@
  */
 
 import { createParachuteRenderer, GRID_WIDTH, GRID_HEIGHT, LAYOUT } from '../src/render/parachute.js';
-import { createParachuteGame, LANES, STOPS, SHORE_DOCK, CAPACITY } from '../src/games/parachute.js';
+import {
+  createParachuteGame,
+  LANES,
+  STOPS,
+  SHORE_DOCK,
+  CAPACITY,
+  RUN_STEPS,
+} from '../src/games/parachute.js';
 import {
   patternSize,
   PARACHUTIST,
@@ -125,7 +132,7 @@ check('the backing store matches the grid',
 {
   const game = createParachuteGame({ seed: 12345 });
   for (let i = 0; i < 600; i++) game.update({ left: false, right: true });
-  const { rects } = harness.draw(game.state, { clock: '14:32', colonOn: true });
+  const { rects } = harness.draw(game.state, {});
   const fractional = rects.filter((r) => ![r.x, r.y, r.w, r.h].every(Number.isInteger));
   check('every drawn rectangle lands on whole pixels', fractional.length === 0, JSON.stringify(fractional.slice(0, 3)));
   const offGrid = rects.filter((r) => (r.x % SCALE || r.y % SCALE || r.w % SCALE || r.h % SCALE) && !(r.x === 0 && r.y === 0));
@@ -135,7 +142,7 @@ check('the backing store matches the grid',
 // --- the ghost board: every position visible at all times
 {
   const game = createParachuteGame({ seed: 12345 });
-  const { rects } = harness.draw(game.state, { clock: '14:32' });
+  const { rects } = harness.draw(game.state, {});
   const ghost = cellsOf(rects, GHOST);
   const lit = new Set(boatCells(game.state.boatDock));
 
@@ -166,7 +173,7 @@ check('the backing store matches the grid',
     const t = game.state.parachutists.find((p) => !p.doomed);
     game.update(t ? { left: t.lane < game.state.boatDock, right: t.lane > game.state.boatDock } : {});
   }
-  const { rects } = harness.draw(game.state, { clock: '14:32' });
+  const { rects } = harness.draw(game.state, {});
   const ink = cellsOf(rects, INK);
 
   const left = LAYOUT.DOCK_COL[game.state.boatDock] - half(W.hull);
@@ -205,7 +212,7 @@ check('the backing store matches the grid',
       const game = createParachuteGame({ seed: 3 });
       game.state.step = step;
       game.state.boatDock = dock;
-      const { rects } = harness.draw(game.state, { clock: '14:32' });
+      const { rects } = harness.draw(game.state, {});
       const painted = cellsOf(rects, INK, DIM);
       const lit = new Set(boatCells(dock));
       for (const cell of painted) {
@@ -217,21 +224,90 @@ check('the backing store matches the grid',
     collisions.size === 0, `${collisions.size} cells, e.g. ${[...collisions].slice(0, 6).join(', ')}`);
 }
 
-// --- the clock
+// --- the readout, now that the wall clock is gone
+//
+// The clock was dropped and the score took the top-left corner it held, with
+// the miss lamps opposite. These assert the band actually reads that way --
+// a renderer that quietly drew nothing there would still pass every layout
+// check above, since the readout occupies no cell an entity can use.
 {
   const game = createParachuteGame({ seed: 1 });
+  const plain = harness.draw(game.state, {});
+
+  check('the readout draws as segments, not text', plain.texts.length === 0);
+
+  // The clock was the only caller-supplied string the panel ever drew, and
+  // the only reason segments.js knew how to render a ':'. Nothing may bring
+  // it back by accident.
   const withClock = harness.draw(game.state, { clock: '18:45', colonOn: true });
-  const withoutClock = harness.draw(game.state, {});
-  check('the clock draws as segments, not text',
-    withClock.rects.length > withoutClock.rects.length && withClock.texts.length === 0);
+  check('a leftover clock in the view draws nothing',
+    JSON.stringify(withClock.rects) === JSON.stringify(plain.rects));
 
-  const on = cellsOf(harness.draw(game.state, { clock: '18:45', colonOn: true }).rects, INK).size;
-  const off = cellsOf(harness.draw(game.state, { clock: '18:45', colonOn: false }).rects, INK).size;
-  check('the colon blinks', on > off, `${on} vs ${off}`);
+  /** Lit cells inside a row band, optionally restricted to one half. */
+  function bandCells(state, top, bottom, half = null) {
+    const cells = cellsOf(harness.draw(state, {}).rects, INK);
+    const out = [];
+    for (const cell of cells) {
+      const [col, row] = cell.split(',').map(Number);
+      if (row < top || row > bottom) continue;
+      if (half === 'left' && col >= GRID_WIDTH / 2) continue;
+      if (half === 'right' && col < GRID_WIDTH / 2) continue;
+      out.push([col, row]);
+    }
+    return out;
+  }
 
-  const eight = cellsOf(harness.draw(game.state, { clock: '88:88' }).rects, INK).size;
-  const ones = cellsOf(harness.draw(game.state, { clock: '11:11' }).rects, INK).size;
-  check('digits light different segment counts', eight > ones, `88:88 ${eight}, 11:11 ${ones}`);
+  const scored = createParachuteGame({ seed: 1 });
+  scored.state.score = 888;
+  const dim = createParachuteGame({ seed: 1 });
+  dim.state.score = 0;
+
+  const bright = bandCells(scored.state, 0, 25, 'left');
+  const faint = bandCells(dim.state, 0, 25, 'left');
+  check('the score lights more segments as it climbs',
+    bright.length > faint.length, `888 lights ${bright.length}, 000 lights ${faint.length}`);
+  check('the score sits in the corner the clock used to hold',
+    faint.length > 0 && Math.min(...faint.map(([col]) => col)) < 8,
+    `leftmost lit column ${faint.length ? Math.min(...faint.map(([col]) => col)) : 'none'}`);
+  // The band the clock's removal freed: the bar moved up into it and the
+  // plane moved up behind the bar, so the rows between them are now clear.
+  // This is the reclaim, and it is the only assertion that would catch the
+  // readout quietly sprawling back down over the play area.
+  check('the rows freed below the readout are clear',
+    bandCells(dim.state, 31, 37).length === 0,
+    `${bandCells(dim.state, 31, 37).length} cells still lit between the bar and the plane`);
+
+  // Miss lamps: one more lights for each life spent, all of them in the half
+  // of the band the score does not occupy.
+  const lampCounts = [];
+  for (let misses = 0; misses <= 4; misses++) {
+    const s = createParachuteGame({ seed: 1 });
+    s.state.score = 0;
+    s.state.misses = misses;
+    lampCounts.push(bandCells(s.state, 8, 18, 'right').length);
+  }
+  const perLamp = lampCounts[1] - lampCounts[0];
+  check('a miss lamp lights for each life spent',
+    perLamp > 0 && lampCounts.every((n, i) => n === lampCounts[0] + perLamp * i),
+    lampCounts.join(', '));
+
+  const spentAll = createParachuteGame({ seed: 1 });
+  spentAll.state.score = 0;
+  spentAll.state.misses = 4;
+  const before = new Set(bandCells(dim.state, 0, 25).map(String));
+  const added = bandCells(spentAll.state, 0, 25).filter((cell) => !before.has(String(cell)));
+  check('the miss lamps sit opposite the score',
+    added.length > 0 && added.every(([col]) => col >= GRID_WIDTH / 2),
+    `${added.filter(([col]) => col < GRID_WIDTH / 2).length} of ${added.length} lamp cells on the score's side`);
+
+  // Time bar: full at the start, empty at the end.
+  const fresh = createParachuteGame({ seed: 1 });
+  const spent = createParachuteGame({ seed: 1 });
+  spent.state.step = RUN_STEPS;
+  const barFull = bandCells(fresh.state, 26, 32).length;
+  const barGone = bandCells(spent.state, 26, 32).length;
+  check('the time bar empties as the run runs out',
+    barFull > 0 && barGone === 0, `${barFull} lit at the start, ${barGone} at the end`);
 }
 
 // --- ghost opacity stays in the intended band
@@ -248,7 +324,7 @@ check('the backing store matches the grid',
   const game = createParachuteGame({ seed: 12345 });
   for (let i = 0; i < 400; i++) game.update({ left: true, right: false });
   const before = JSON.stringify(game.state);
-  harness.draw(game.state, { clock: '14:32', badge: 'PRACTICE' });
+  harness.draw(game.state, { badge: 'PRACTICE' });
   check('draw does not mutate game state', JSON.stringify(game.state) === before);
 }
 
@@ -257,7 +333,7 @@ check('the backing store matches the grid',
   const tiny = createHarness();
   tiny.canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1, height: 1 });
   let survived = true; let message = '';
-  try { tiny.renderer.resize(); tiny.draw(createParachuteGame({ seed: 1 }).state, { clock: '00:00' }); }
+  try { tiny.renderer.resize(); tiny.draw(createParachuteGame({ seed: 1 }).state, {}); }
   catch (error) { survived = false; message = error.message; }
   check('survives a 1x1 viewport', survived, message);
 }

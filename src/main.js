@@ -173,30 +173,6 @@ function boot() {
 
   setInterval(updateCountdown, 1000);
 
-  // ---- the wall clock shown on the panel
-  //
-  // Local time, not UTC: a handheld shows the time where you are. This is
-  // render-only chrome -- it is passed into draw() rather than read by the
-  // renderer, and it never reaches the simulation. Memoised per second so a
-  // 60Hz render loop does not build a Date sixty times a second.
-
-  let clockFaceSecond = -1;
-  let clockFace = { clock: '00:00', colonOn: true };
-
-  function readClockFace() {
-    const stamp = now();
-    const second = Math.floor(stamp / 1000);
-    if (second !== clockFaceSecond) {
-      clockFaceSecond = second;
-      const when = new Date(stamp);
-      const hh = String(when.getHours()).padStart(2, '0');
-      const mm = String(when.getMinutes()).padStart(2, '0');
-      // The colon blinks once a second, as it did on the originals.
-      clockFace = { clock: `${hh}:${mm}`, colonOn: when.getSeconds() % 2 === 0 };
-    }
-    return clockFace;
-  }
-
   // ---- the loop
 
   const loop = createLoop({
@@ -231,10 +207,7 @@ function boot() {
       }
     },
     render() {
-      renderer.draw(game.state, {
-        badge: mode === MODE_PRACTICE ? 'PRACTICE' : null,
-        ...readClockFace(),
-      });
+      renderer.draw(game.state, { badge: mode === MODE_PRACTICE ? 'PRACTICE' : null });
     },
   });
 

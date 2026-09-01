@@ -12,12 +12,16 @@ whole board at a glance.
 
 **Parachute rescue** -- survivors bail out of a burning aircraft and descend
 through four lanes. The boat catches them and carries up to four, then has to
-run to the shore to unload before it can take any more. Sharks patrol the
-water and will take whoever is aboard. Only survivors delivered to shore
-score, with a bonus for landing a full boat of four. Four misses or sixty
-seconds ends the run, and the difficulty ramps with rescues rather than the
-clock alone. Tap or hold either half of the screen to steer, or use the arrow
-keys on desktop.
+cross two stretches of open water to the shore and unload before it can take
+any more. Sharks patrol the lanes and will take whoever is aboard. Only
+survivors delivered to shore score, with a bonus for landing a full boat of
+four. Four misses or sixty seconds ends the run, and the difficulty ramps with
+rescues rather than the clock alone. Tap or hold either half of the screen to
+steer, or use the arrow keys on desktop.
+
+The crossing, not the unloading, is what a delivery costs: the boat is locked
+for under a second at the jetty, and the rest of the errand is the run out and
+back, with the lanes filling up behind you.
 
 Vanilla HTML, CSS, and ES modules -- no framework, no build step, no runtime
 dependencies.
@@ -112,8 +116,8 @@ Runs three suites with Node -- no framework, no `npm install` needed.
 
 - `determinism.test.js` -- a fixed seed produces byte-identical output across
   repeat runs and across 30/60/120Hz frame pacing, different seeds diverge,
-  daily seeds depend on the UTC date alone, and a seeded run still matches its
-  recorded golden fingerprint.
+  daily seeds depend on the UTC date alone, and a seeded run still hashes to
+  its recorded golden fingerprint.
 - `progress.test.js` -- streaks increment on consecutive days and reset after a
   gap, a day cannot be played twice, share text is exactly the intended shape,
   and the dev clock is refused off a dev host.
@@ -121,8 +125,9 @@ Runs three suites with Node -- no framework, no `npm install` needed.
   `[hidden]` beats the author `display` rules that would otherwise defeat it.
 - `render.test.js` -- drives the renderer against a recording canvas: every
   segment snaps to a whole cell, every position on the board is ghosted, lit
-  entities land on their own segments, and painted background art never
-  occupies a cell an entity can use.
+  entities land on their own segments, painted background art never occupies a
+  cell an entity can use, and the readout band holds the score, the miss lamps
+  and the time bar and nothing else.
 - `flow.test.js` -- boots the real `src/main.js` against a mini-DOM and walks
   the whole ritual: play, lock out, roll over to the next day, share, practice.
 

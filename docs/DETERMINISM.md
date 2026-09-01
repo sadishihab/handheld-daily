@@ -48,11 +48,12 @@ Inside simulation code: no `Date.now()`, no `new Date()`, no
 counts steps -- the loop hands `update()` a monotonic integer step index, and
 60 steps is one simulated second.
 
-The panel clock is the exception that proves the rule. It shows real local
-time, but the renderer never reads a clock: the shell formats it and passes it
-into `draw()` as a string, alongside the practice badge, in a `view` argument
-that is explicitly chrome. Nothing in `view` can reach game state, so the
-clock cannot influence a run.
+The panel used to show a wall clock, which was the exception that proved the
+rule: the renderer never read a clock itself, the shell formatted it and
+passed it into `draw()` as a string in a `view` argument that is explicitly
+chrome. The clock is gone -- it earned none of the space it took -- but the
+`view` argument stays, and so does the rule about it. Nothing in `view` can
+reach game state, so nothing drawn from the wall clock can influence a run.
 
 ```js
 // wrong -- real time leaks in, and the run stops being reproducible
@@ -157,14 +158,26 @@ deterministic and still hands every player a different puzzle -- reordering
 two RNG draws, retuning a spawn interval, reordering the update phases. Both
 runs simply change together and agree.
 
-So one assertion pins the actual outcome of a known seed against recorded
-numbers:
+So one assertion pins the actual content of a known seed against recorded
+values -- a digest of the whole trace, plus the closing summary for legibility:
 
 ```js
-const GOLDEN = { seed: 12345, scriptSeed: 9, score: 3, misses: 3, step: 661, endReason: 'misses' };
+const GOLDEN = {
+  seed: 12345, scriptSeed: 31, score: 60, rescued: 4, misses: 4,
+  step: 1178, endReason: 'misses', trace: 'eabb8c8608dd0241',
+};
 ```
 
-Before launch, a failure here just means updating the numbers. After launch it
+The digest is the assertion; the summary is there so a failure says something
+human before it says a hash mismatched. Pinning the summary alone is not
+enough, and this is not hypothetical: shortening the unload and widening the
+run to the shore moved the boat onto docks that had not existed before, from
+step 22 of this very seed, and the run still ended on the same score, rescues,
+misses and step. The summary-only fingerprint reported "unchanged" through a
+change that altered every player's puzzle. A fingerprint trusted that far has
+to pin the whole run.
+
+Before launch, a failure here just means updating the values. After launch it
 means today's puzzle no longer matches the one players already played and
 shared, so treat it as a decision to make deliberately rather than a stale
 value to re-baseline.

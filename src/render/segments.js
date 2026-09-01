@@ -36,8 +36,6 @@ export function digitMetrics(unit, len) {
     height: len * 2 + unit * 3,
     /** Cell advance from one glyph to the next. */
     advance: len + unit * 3,
-    colonWidth: unit,
-    colonAdvance: unit * 3,
   };
 }
 
@@ -55,31 +53,24 @@ function segmentRects(unit, len) {
 }
 
 /**
- * Draw a run of seven-segment glyphs. Digits and ':' are supported.
+ * Draw a run of seven-segment digits.
+ *
+ * Digits only. A ':' separator lived here for the panel clock; the clock was
+ * dropped and nothing else on the panel spells anything, so it went with it.
  *
  * @param {object} lcd LCD surface.
  * @param {string} text
  * @param {number} col Left cell.
  * @param {number} row Top cell.
- * @param {{on: string, off: string|null, unit: number, len: number, colonOn?: boolean}} style
+ * @param {{on: string, off: string|null, unit: number, len: number}} style
  */
 export function drawDigits(lcd, text, col, row, style) {
-  const { on, off, unit, len, colonOn = true } = style;
+  const { on, off, unit, len } = style;
   const metrics = digitMetrics(unit, len);
   const rects = segmentRects(unit, len);
   let x = col;
 
   for (const char of text) {
-    if (char === ':') {
-      const dotStyle = colonOn ? on : off;
-      if (dotStyle) {
-        lcd.fillArea(x, row + unit + Math.floor(len / 2), unit, unit, dotStyle);
-        lcd.fillArea(x, row + unit * 2 + len + Math.floor(len / 2), unit, unit, dotStyle);
-      }
-      x += metrics.colonAdvance;
-      continue;
-    }
-
     const lit = DIGIT_SEGMENTS[char] || '';
     for (const name of ALL) {
       const isLit = lit.includes(name);
@@ -90,15 +81,4 @@ export function drawDigits(lcd, text, col, row, style) {
     }
     x += metrics.advance;
   }
-}
-
-/** Total cell width of a string rendered at this size. */
-export function measure(text, unit, len) {
-  const metrics = digitMetrics(unit, len);
-  let width = 0;
-  for (const char of text) {
-    width += char === ':' ? metrics.colonAdvance : metrics.advance;
-  }
-  // Trim the trailing gap.
-  return Math.max(0, width - (unit * 2));
 }

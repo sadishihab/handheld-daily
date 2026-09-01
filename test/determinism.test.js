@@ -8,6 +8,8 @@
  * shareable and scores are not comparable.
  */
 
+import { createHash } from 'node:crypto';
+
 import { createRng } from '../src/rng.js';
 import { createLoop, FIXED_STEP_MS } from '../src/loop.js';
 import {
@@ -19,6 +21,7 @@ import {
   SHORE_DOCK,
   CAPACITY,
   SPLASH_STOP,
+  SHORE_GAP,
 } from '../src/games/parachute.js';
 import {
   dailySeed,
@@ -330,22 +333,46 @@ check(
 // results players have already shared, so treat a failure here as a
 // deliberate decision rather than a number to re-baseline.
 //
-// Re-baselined twice, both before release:
+// It pins a digest of the whole trace, not just the closing summary. The
+// summary alone is far too coarse: widening the run to the shore moved the
+// boat onto docks that had not existed before, from step 22 of this very
+// seed, and still ended on the same score, rescues, misses and step. A
+// fingerprint that reads "unchanged" through a change like that is worse
+// than none, because it is trusted. The summary is kept alongside so a
+// failure says something human before it says a hash mismatched.
+//
+// Re-baselined three times, all before release:
 //   1. when positions became discrete LCD segments (lanes and stops rather
 //      than columns and fixed-point rows);
 //   2. when the rescue loop landed -- boat capacity, the shore run and sharks
 //      all draw from the same RNG stream, and the difficulty ramp was retuned
-//      around them, so no pre-rescue run could survive unchanged.
-const GOLDEN = { seed: 12345, scriptSeed: 31, score: 60, rescued: 4, misses: 4, step: 1178, endReason: 'misses' };
-const goldenRun = playScripted(GOLDEN.seed, recordInputScript(GOLDEN.scriptSeed, RUN_STEPS)).state;
+//      around them, so no pre-rescue run could survive unchanged;
+//   3. when the unload was shortened and paid for with open water between the
+//      last lane and the shore, which changes both the dock range the boat
+//      moves over and when deliveries land, and so the spawn ramp with them.
+const GOLDEN = {
+  seed: 12345,
+  scriptSeed: 31,
+  score: 60,
+  rescued: 4,
+  misses: 4,
+  step: 1178,
+  endReason: 'misses',
+  trace: 'eabb8c8608dd0241',
+};
+const golden = playScripted(GOLDEN.seed, recordInputScript(GOLDEN.scriptSeed, RUN_STEPS));
+const goldenRun = golden.state;
+const goldenTrace = createHash('sha256').update(golden.trace).digest('hex').slice(0, 16);
 check(
   'seeded run still produces its recorded outcome (golden fingerprint)',
   goldenRun.score === GOLDEN.score &&
     goldenRun.rescued === GOLDEN.rescued &&
     goldenRun.misses === GOLDEN.misses &&
     goldenRun.step === GOLDEN.step &&
-    goldenRun.endReason === GOLDEN.endReason,
-  `got score ${goldenRun.score}, rescued ${goldenRun.rescued}, misses ${goldenRun.misses}, step ${goldenRun.step}, ${goldenRun.endReason}`
+    goldenRun.endReason === GOLDEN.endReason &&
+    goldenTrace === GOLDEN.trace,
+  `got score ${goldenRun.score}, rescued ${goldenRun.rescued}, misses ${goldenRun.misses}, ` +
+    `step ${goldenRun.step}, ${goldenRun.endReason}, trace ${goldenTrace}`
 );
 
 // Positions are discrete LCD segments: small integers, never between cells.
@@ -382,10 +409,18 @@ check(
   check('the boat sits on a real dock', boatInRange);
 }
 
+// The shore sits past the last lane with SHORE_GAP docks of open water in
+// between -- water the boat can cross but cannot catch or be bitten in, which
+// is what makes the trip, rather than the unload, the price of a delivery.
 check(
   'the layout is a small fixed set of segments',
-  Number.isInteger(LANES) && Number.isInteger(STOPS) && SHORE_DOCK === LANES && STOPS > 1,
-  `${LANES} lanes, ${STOPS} stops, shore at ${SHORE_DOCK}`
+  Number.isInteger(LANES) &&
+    Number.isInteger(STOPS) &&
+    Number.isInteger(SHORE_GAP) &&
+    SHORE_GAP >= 0 &&
+    SHORE_DOCK === LANES + SHORE_GAP &&
+    STOPS > 1,
+  `${LANES} lanes, ${STOPS} stops, ${SHORE_GAP} of open water, shore at ${SHORE_DOCK}`
 );
 
 check(

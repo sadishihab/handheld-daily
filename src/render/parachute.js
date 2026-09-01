@@ -9,12 +9,11 @@
  * Nothing is interpolated. Segments are on or off and snap between positions
  * on logic ticks, so the loop's interpolation alpha is ignored.
  *
- * The renderer reads game state and mutates nothing. Wall-clock time arrives
- * as a formatted string in `view`; the renderer never reads a clock itself.
+ * The renderer reads game state and mutates nothing.
  */
 
 import { createLcdSurface } from './lcd.js';
-import { drawDigits, measure } from './segments.js';
+import { drawDigits } from './segments.js';
 import {
   drawPattern,
   patternSize,
@@ -36,6 +35,7 @@ import {
   STOPS,
   DECK_STOP,
   SHORE_DOCK,
+  DOCK_COUNT,
   CAPACITY,
   MAX_MISSES,
   RUN_STEPS,
@@ -51,14 +51,39 @@ import {
 export const GRID_WIDTH = 168;
 export const GRID_HEIGHT = 220;
 
+const PARACHUTIST_W = patternSize(PARACHUTIST).width;
+const HULL_W = patternSize(HULL).width;
+const SHARK_W = patternSize(SHARK).width;
+const SPLASH_W = patternSize(SPLASH).width;
+const JETTY_W = patternSize(JETTY).width;
+
+/** Where the water stops and the sand starts. */
+const SHORE_EDGE = GRID_WIDTH - JETTY_W;
+
+/**
+ * Every boat position is one pitch from the next, lane or open water alike:
+ * the boat has to read as travelling at a constant speed whether it is
+ * chasing a drop or running for the shore.
+ *
+ * The pitch is the widest that fits every dock across the panel, so widening
+ * SHORE_GAP squeezes the board up rather than pushing the shore off the
+ * glass. Today that is 24 cells against a 19-cell hull -- five clear between
+ * neighbouring docks, enough for the ghost board to read as a row of moorings
+ * rather than one long bar. Past SHORE_GAP 3 the pitch falls under the hull
+ * width and the moorings start to overlap; the hull has to shrink with them.
+ */
+const DOCK_PITCH = Math.floor((GRID_WIDTH - HULL_W) / (DOCK_COUNT - 1));
+const DOCK_SPAN = (DOCK_COUNT - 1) * DOCK_PITCH;
+const DOCK_COL = Array.from(
+  { length: DOCK_COUNT },
+  (_, i) => Math.floor((GRID_WIDTH - DOCK_SPAN) / 2) + i * DOCK_PITCH
+);
 /** Centre column of each lane, and of the shore. */
-const LANE_COL = [22, 52, 82, 112];
-const SHORE_CENTRE = 145;
-/** Every boat position: the lanes, then the shore. */
-const DOCK_COL = [...LANE_COL, SHORE_CENTRE];
+const LANE_COL = DOCK_COL.slice(0, LANES);
+const SHORE_CENTRE = DOCK_COL[SHORE_DOCK];
 
 /** Top row of a parachutist sprite at each stop. */
-const STOP_ROW = [66, 84, 102, 120, 138, 156, 174];
+const STOP_ROW = [60, 79, 98, 117, 136, 155, 174];
 
 const BOAT_TOP = 178;
 const SLOT_ROW = BOAT_TOP;
@@ -67,14 +92,23 @@ const WATERLINE_ROW = 192;
 const SPLASH_ROW = 196;
 const SHARK_ROW = 202;
 
-const CLOCK_ROW = 2;
-const CLOCK_COL = 4;
+/**
+ * The readout band. The score took the top-left corner when the wall clock
+ * was dropped -- it is the number the player is actually chasing, and it
+ * reads better large and leading than tucked into a corner -- with the miss
+ * lamps opposite it and the time bar spanning under both.
+ */
+const READOUT_ROW = 2;
+const EDGE_COL = 4;
 const DIGIT_UNIT = 3;
 const DIGIT_LEN = 7;
-const MISS_ROW = 28;
-const BAR_ROW = 35;
+const MISS_ROW = 11;
+const MISS_W = 8;
+const MISS_H = 5;
+const MISS_PITCH = 11;
+const BAR_ROW = 28;
 /** The play area starts below the readout. */
-const PLANE_ROW = 45;
+const PLANE_ROW = 38;
 
 /**
  * The panel layout, exported so tests can derive exactly which cells an
@@ -90,11 +124,6 @@ export const LAYOUT = {
   SHARK_ROW,
   WATERLINE_ROW,
 };
-
-const PARACHUTIST_W = patternSize(PARACHUTIST).width;
-const HULL_W = patternSize(HULL).width;
-const SHARK_W = patternSize(SHARK).width;
-const SPLASH_W = patternSize(SPLASH).width;
 
 const half = (n) => Math.floor(n / 2);
 
@@ -146,7 +175,7 @@ export function createParachuteRenderer(canvas) {
     paint(PLANE, 6, PLANE_ROW, lcd.colors.ink);
     // Billows trailing back from the tail, growing as they drift. The column
     // runs sideways rather than straight up: the readout occupies everything
-    // above, and smoke crossing the clock digits is unreadable.
+    // above, and smoke crossing the score or the time bar is unreadable.
     const dim = lcd.colors.dim;
     paint(SMOKE_SMALL, 34, PLANE_ROW - 3, dim);
     paint(SMOKE_MEDIUM, 42, PLANE_ROW - 5, dim);
@@ -160,11 +189,14 @@ export function createParachuteRenderer(canvas) {
     const ink = lcd.colors.ink;
     // The jetty sits below the hull line and the hut well above it, so the
     // boat can dock without either drawing through it.
-    paint(JETTY, SHORE_CENTRE - 14, WATERLINE_ROW + 2, ink);
+    // Anchored to the right edge rather than to SHORE_CENTRE. The docks are
+    // centred as a span, so the shore -- always the last of them -- sits near
+    // the edge, and a jetty centred under it would run off the glass.
+    paint(JETTY, GRID_WIDTH - JETTY_W, WATERLINE_ROW + 2, ink);
     paint(HUT, SHORE_CENTRE - 6, WATERLINE_ROW - 28, ink);
     paint(PALM, GRID_WIDTH - 15, WATERLINE_ROW - 46, ink);
     // Sand under the jetty.
-    lcd.fillArea(SHORE_CENTRE - 16, WATERLINE_ROW + 9, GRID_WIDTH - SHORE_CENTRE + 16, 2, ink);
+    lcd.fillArea(SHORE_EDGE, WATERLINE_ROW + 9, GRID_WIDTH - SHORE_EDGE, 2, ink);
   }
 
   /** Is this cell part of a splash or a shark segment? */
@@ -183,7 +215,7 @@ export function createParachuteRenderer(canvas) {
    */
   function drawWater(state) {
     const phase = Math.floor(state.step / 24) % 2;
-    const right = SHORE_CENTRE - 16;
+    const right = SHORE_EDGE;
     for (let row = WATERLINE_ROW + 2; row < GRID_HEIGHT; row += 6) {
       if (reservedForEntity(0, row)) continue;
       for (let col = (phase + half(row)) % 12; col < right; col += 12) {
@@ -195,33 +227,27 @@ export function createParachuteRenderer(canvas) {
 
   /* -- readout ----------------------------------------------------------- */
 
-  function drawReadout(state, view) {
+  function drawReadout(state) {
     const on = lcd.colors.ink;
     const off = lcd.colors.ghost;
-    const digit = { on, off, unit: DIGIT_UNIT, len: DIGIT_LEN };
-
-    if (view.clock) {
-      drawDigits(lcd, view.clock, CLOCK_COL, CLOCK_ROW, {
-        ...digit,
-        colonOn: view.colonOn !== false,
-      });
-    }
 
     const score = String(Math.min(999, state.score)).padStart(3, '0');
-    const width = measure(score, DIGIT_UNIT, DIGIT_LEN);
-    drawDigits(lcd, score, GRID_WIDTH - width - CLOCK_COL, CLOCK_ROW, digit);
+    drawDigits(lcd, score, EDGE_COL, READOUT_ROW, {
+      on, off, unit: DIGIT_UNIT, len: DIGIT_LEN,
+    });
 
-    // Miss markers: fixed segments, lit as they are spent.
+    // Miss lamps: fixed segments, lit as they are spent.
     for (let i = 0; i < MAX_MISSES; i++) {
-      const col = GRID_WIDTH - CLOCK_COL - (MAX_MISSES - i) * 9;
-      lcd.fillArea(col, MISS_ROW, 6, 4, i < state.misses ? on : off);
+      const col = GRID_WIDTH - EDGE_COL - (MAX_MISSES - i) * MISS_PITCH;
+      lcd.fillArea(col, MISS_ROW, MISS_W, MISS_H, i < state.misses ? on : off);
     }
 
     // Time bar: every cell drawn, lit ones showing time left.
     const remaining = Math.max(0, RUN_STEPS - state.step);
-    const lit = Math.ceil((remaining * (GRID_WIDTH - CLOCK_COL * 2)) / RUN_STEPS);
-    lcd.fillArea(CLOCK_COL, BAR_ROW, GRID_WIDTH - CLOCK_COL * 2, 3, off);
-    if (lit > 0) lcd.fillArea(CLOCK_COL, BAR_ROW, lit, 3, on);
+    const width = GRID_WIDTH - EDGE_COL * 2;
+    const lit = Math.ceil((remaining * width) / RUN_STEPS);
+    lcd.fillArea(EDGE_COL, BAR_ROW, width, 3, off);
+    if (lit > 0) lcd.fillArea(EDGE_COL, BAR_ROW, lit, 3, on);
   }
 
   function drawEndOverlay(state) {
@@ -237,7 +263,7 @@ export function createParachuteRenderer(canvas) {
     resize: lcd.resize,
     /**
      * @param {object} state Live game state. Read only.
-     * @param {{badge?: string|null, clock?: string, colonOn?: boolean}} [view]
+     * @param {{badge?: string|null}} [view]
      */
     draw(state, view = {}) {
       lcd.clear();
@@ -246,7 +272,7 @@ export function createParachuteRenderer(canvas) {
       drawPlane();
       drawWater(state);
       drawShore();
-      drawReadout(state, view);
+      drawReadout(state);
 
       const ink = lcd.colors.ink;
       const ghost = lcd.colors.ghost;
