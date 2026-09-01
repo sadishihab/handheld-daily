@@ -115,9 +115,22 @@ function boatCells(dock) {
   const left = LAYOUT.DOCK_COL[dock] - half(W.hull);
   const cells = patternCells(HULL, left, LAYOUT.HULL_ROW);
   for (let slot = 0; slot < CAPACITY; slot++) {
-    cells.push(...patternCells(SURVIVOR, left + 2 + slot * 4, LAYOUT.SLOT_ROW));
+    cells.push(
+      ...patternCells(SURVIVOR, left + LAYOUT.SLOT_INSET + slot * LAYOUT.SLOT_PITCH, LAYOUT.SLOT_ROW)
+    );
   }
   return cells;
+}
+
+// The slots have to stay clear of each other, or a full boat reads as one
+// smear rather than four survivors. This is the constraint that decides how
+// narrow the hull may get, so it is asserted rather than left to the eye.
+{
+  const gap = LAYOUT.SLOT_PITCH - patternSize(SURVIVOR).width;
+  const rightmost = LAYOUT.SLOT_INSET + (CAPACITY - 1) * LAYOUT.SLOT_PITCH + patternSize(SURVIVOR).width;
+  check('survivor slots leave a clear column between them', gap >= 1, `gap ${gap}`);
+  check('every survivor slot sits on the hull',
+    LAYOUT.SLOT_INSET >= 0 && rightmost <= W.hull, `slots span 0..${rightmost} of ${W.hull}`);
 }
 
 console.log('renderer\n');
@@ -164,6 +177,14 @@ check('the backing store matches the grid',
   }
   check(`all ${SHORE_DOCK + 1} dock positions are ghosted, including the shore`,
     dockMissing.length === 0, `${dockMissing.length} missing, e.g. ${dockMissing.slice(0, 3).join(', ')}`);
+
+  // Ghosting every dock is only useful if the player can tell them apart.
+  // With SHORE_GAP widened the docks crowd together, and at some point the
+  // row stops reading as moorings and becomes one continuous bar.
+  const pitch = LAYOUT.DOCK_COL[1] - LAYOUT.DOCK_COL[0];
+  check('neighbouring docks do not overlap', pitch > W.hull, `pitch ${pitch}, hull ${W.hull}`);
+  check('neighbouring docks are separated by clear water', pitch - W.hull >= 3,
+    `${pitch - W.hull} clear cells between hulls`);
 }
 
 // --- lit entities land exactly on their segments
@@ -181,9 +202,10 @@ check('the backing store matches the grid',
   check('the hull is lit at its dock', hull.every((c) => ink.has(c)));
   check('survivors aboard are lit in their slots', game.state.aboard > 0, `aboard ${game.state.aboard}`);
 
-  const filled = patternCells(SURVIVOR, left + 2, LAYOUT.SLOT_ROW);
+  const slotCol = (slot) => left + LAYOUT.SLOT_INSET + slot * LAYOUT.SLOT_PITCH;
+  const filled = patternCells(SURVIVOR, slotCol(0), LAYOUT.SLOT_ROW);
   check('the first survivor slot is lit when carrying', filled.every((c) => ink.has(c)));
-  const emptySlot = patternCells(SURVIVOR, left + 2 + (CAPACITY - 1) * 4, LAYOUT.SLOT_ROW);
+  const emptySlot = patternCells(SURVIVOR, slotCol(CAPACITY - 1), LAYOUT.SLOT_ROW);
   check('an unused slot stays ghosted',
     game.state.aboard === CAPACITY || !emptySlot.every((c) => ink.has(c)));
 

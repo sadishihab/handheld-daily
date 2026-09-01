@@ -55,16 +55,24 @@ export const PARACHUTIST = [
   '..#...#..',
 ];
 
-/** One survivor standing on the deck. 3 wide, 4 tall. */
-export const SURVIVOR = ['.#.', '###', '.#.', '#.#'];
+/**
+ * One survivor standing on the deck. 2 wide, 4 tall.
+ *
+ * Narrow because the boat has to be narrow: ten dock positions have to tile
+ * across the panel, which caps the hull at 13 cells, which caps four slots at
+ * a 3-cell pitch. A 2-wide figure is what fits with a clear column between
+ * neighbours -- at a 3-wide sprite the arms row runs into the next survivor
+ * and four of them read as one bar.
+ */
+export const SURVIVOR = ['.#', '##', '.#', '##'];
 
-/** The hull, without survivors. 19 wide, 5 tall, sits under the slot row. */
+/** The hull, without survivors. 13 wide, 5 tall, sits under the slot row. */
 export const HULL = [
-  '###################',
-  '###################',
-  '.#################.',
-  '..###############..',
-  '....###########....',
+  '#############',
+  '#############',
+  '.###########.',
+  '..#########..',
+  '....#####....',
 ];
 
 /** A shark: dorsal fin over a body with a tail. 17 wide, 7 tall. */

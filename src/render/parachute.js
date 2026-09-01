@@ -56,6 +56,15 @@ const HULL_W = patternSize(HULL).width;
 const SHARK_W = patternSize(SHARK).width;
 const SPLASH_W = patternSize(SPLASH).width;
 const JETTY_W = patternSize(JETTY).width;
+const SURVIVOR_W = patternSize(SURVIVOR).width;
+
+/**
+ * Where the survivor slots sit on the hull: centred as a block, one clear
+ * cell between neighbours, so a full boat reads as four figures rather than
+ * one smear.
+ */
+const SLOT_PITCH = SURVIVOR_W + 1;
+const SLOT_INSET = Math.floor((HULL_W - (CAPACITY * SLOT_PITCH - 1)) / 2);
 
 /** Where the water stops and the sand starts. */
 const SHORE_EDGE = GRID_WIDTH - JETTY_W;
@@ -119,6 +128,8 @@ export const LAYOUT = {
   DOCK_COL,
   STOP_ROW,
   SLOT_ROW,
+  SLOT_INSET,
+  SLOT_PITCH,
   HULL_ROW,
   SPLASH_ROW,
   SHARK_ROW,
@@ -150,7 +161,7 @@ export function createParachuteRenderer(canvas) {
     const left = DOCK_COL[dock] - half(HULL_W);
     paint(HULL, left, HULL_ROW, style);
     for (let slot = 0; slot < CAPACITY; slot++) {
-      paint(SURVIVOR, left + 2 + slot * 4, SLOT_ROW, slot < aboard ? style : slotStyle);
+      paint(SURVIVOR, left + SLOT_INSET + slot * SLOT_PITCH, SLOT_ROW, slot < aboard ? style : slotStyle);
     }
   }
 

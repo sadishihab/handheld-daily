@@ -12,16 +12,16 @@ whole board at a glance.
 
 **Parachute rescue** -- survivors bail out of a burning aircraft and descend
 through four lanes. The boat catches them and carries up to four, then has to
-cross two stretches of open water to the shore and unload before it can take
-any more. Sharks patrol the lanes and will take whoever is aboard. Only
-survivors delivered to shore score, with a bonus for landing a full boat of
-four. Four misses or sixty seconds ends the run, and the difficulty ramps with
-rescues rather than the clock alone. Tap or hold either half of the screen to
-steer, or use the arrow keys on desktop.
+cross five stretches of open water to the shore before it can take any more.
+Sharks patrol the lanes and will take whoever is aboard. Only survivors
+delivered to shore score, with a bonus for landing a full boat of four. Four
+misses or sixty seconds ends the run, and the difficulty ramps with rescues
+rather than the clock alone. Tap or hold either half of the screen to steer,
+or use the arrow keys on desktop.
 
-The crossing, not the unloading, is what a delivery costs: the boat is locked
-for under a second at the jetty, and the rest of the errand is the run out and
-back, with the lanes filling up behind you.
+The crossing is the entire cost of a delivery. Touching the shore unloads the
+whole boat instantly -- there is no pause to wait out -- so everything a run
+costs you is time spent steering, with the lanes filling up behind you.
 
 Vanilla HTML, CSS, and ES modules -- no framework, no build step, no runtime
 dependencies.

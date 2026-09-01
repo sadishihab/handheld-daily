@@ -2,9 +2,10 @@
  * Parachute rescue -- pure simulation, no rendering and no input handling.
  *
  * Parachutists bail out of a burning aircraft and descend through fixed lanes.
- * The boat catches them, carries up to four, and must run to the shore to
- * unload before it can take any more. Sharks patrol the water and will take
- * whoever is aboard. Only survivors delivered to shore score.
+ * The boat catches them, carries up to four, and must cross open water to the
+ * shore before it can take any more; touching the shore delivers everyone
+ * aboard at once. Sharks patrol the lanes and will take whoever is aboard.
+ * Only survivors delivered to shore score.
  *
  * Positions are discrete LCD segments. A parachutist is always at exactly one
  * (lane, stop), the boat at exactly one dock, a shark at exactly one water
@@ -41,11 +42,25 @@ export const SPLASH_STOP = STOPS;
  * Open-water docks between the last lane and the shore.
  *
  * The boat can neither catch nor be reached by a shark while crossing them,
- * so they are pure travel -- the price of an unload, paid in distance rather
- * than in standing still. Two of them, chosen against a shortened unload so
- * the whole errand keeps costing what it did: see UNLOAD_STEPS.
+ * so they are pure travel -- and with the unload now instant, they are the
+ * entire price of a delivery.
+ *
+ * Five, which is what it takes. Measured over 60 tuning seeds and a 120-seed
+ * holdout against the same greedy AI the previous tunings used, going instant
+ * at the old gap of 2 did not shorten the errand so much as delete it: no run
+ * in 60 ended on misses, every one ran the clock out, and average rescues went
+ * from 20.8 to 32.5. Each dock added back costs about 14 steps of round trip
+ * and buys back some of that, and 5 is where the balance lands on the numbers
+ * the previous tunings were held to -- 40% of losses from the errand against
+ * 42%, 62% of runs ending on misses against 68%, average run 54.9s against
+ * 54.9s -- with time spent motionless down from 9% of a run to 1%.
+ *
+ * Filling the boat still beats ferrying singles, which is the thing that has
+ * to stay true: a player who always delivers at four scores 305 against 132
+ * for one who delivers at one. The margin is far wider than it was at gap 2,
+ * where the two were within 5% and the AI stopped filling at all.
  */
-export const SHORE_GAP = 2;
+export const SHORE_GAP = 5;
 
 /**
  * Boat positions. 0 .. LANES-1 sit under the drop lanes, then SHORE_GAP
@@ -68,27 +83,18 @@ export const POINTS_PER_RESCUE = 10;
 export const FULL_BOAT_BONUS = 20;
 
 /**
- * Steps spent unloading at the shore. The boat is locked while it runs.
+ * Unloading is instant. The boat reaches the shore dock and everyone aboard
+ * is delivered and scored in that same step -- there is no unload timer, and
+ * no state for one.
  *
- * Was 75 -- 1.25s of locked boat, more than twice the ~35 steps of travel
- * that earned it -- and it playtested as dead time rather than tension. Cut
- * to 50 and paid for with SHORE_GAP, so the errand still costs about what it
- * did (~113 steps from mid-lanes against ~110 before) while the share of it
- * spent sitting still drops from 68% to 44%.
+ * It was 75 steps, then 50. Both playtested as dead time rather than tension:
+ * the boat sat still, the lanes filled up, and the player watched. Every step
+ * of the cost now lives in the crossing, which is a thing you are doing
+ * rather than a thing being done to you.
  *
- * Measured over 60 tuning seeds and a 120-seed holdout, against a competent
- * greedy AI, the pair lands on the previous balance: share of losses coming
- * from the errand 42% (was 42%), misses per run on the errand 1.47 (1.47)
- * against 2.07 chasing (2.07), 68% of runs ending on misses (63%), average
- * run 54.9s (55.2s). Time with the boat off station and motionless falls
- * from 16% of a run to 9%.
- *
- * Cutting further without widening the gap collapses the loop: at 50 steps
- * and no gap only 3% of runs end on misses and ferrying survivors one at a
- * time beats filling the boat, which throws away the decision the game is
- * about. Shorten this only alongside SHORE_GAP.
+ * The cost had to go somewhere, and it went into SHORE_GAP -- see the note
+ * there, which is where the real tuning argument is.
  */
-const UNLOAD_STEPS = 50;
 
 /** Steps the boat takes to move one dock. */
 const BOAT_MOVE_INTERVAL = 7;
@@ -189,8 +195,6 @@ export function createParachuteGame({ seed } = {}) {
     misses: 0,
     /** 0 .. SHORE_DOCK. */
     boatDock: Math.floor((LANES - 1) / 2),
-    /** Step at which unloading finishes; 0 when not unloading. */
-    unloadUntil: 0,
     parachutists: [],
     sharks: [],
     missFlash: 0,
@@ -234,7 +238,6 @@ export function createParachuteGame({ seed } = {}) {
     }
     state.rescued += delivered;
     state.aboard = 0;
-    state.unloadUntil = 0;
   }
 
   /**
@@ -249,29 +252,21 @@ export function createParachuteGame({ seed } = {}) {
     const right = Boolean(input && input.right);
     const level = pressure(state);
 
-    // 1. Unloading. The boat is committed once it starts: that commitment is
-    //    the whole tension of the run, and letting the player abort would make
-    //    the shore trip free.
-    if (state.unloadUntil > 0) {
-      if (state.step >= state.unloadUntil) deliver();
-    } else {
-      // 2. Boat. Moving before catches resolve keeps the last-instant save.
-      const direction = (right ? 1 : 0) - (left ? 1 : 0);
-      if (direction !== 0 && state.step >= nextBoatMoveStep) {
-        const target = clamp(state.boatDock + direction, 0, SHORE_DOCK);
-        if (target !== state.boatDock) {
-          state.boatDock = target;
-          nextBoatMoveStep = state.step + BOAT_MOVE_INTERVAL;
-        }
-      }
-
-      // 3. Arriving at the shore with survivors starts the unload.
-      if (state.boatDock === SHORE_DOCK && state.aboard > 0) {
-        state.unloadUntil = state.step + UNLOAD_STEPS;
+    // 1. Boat. Moving before catches resolve keeps the last-instant save.
+    const direction = (right ? 1 : 0) - (left ? 1 : 0);
+    if (direction !== 0 && state.step >= nextBoatMoveStep) {
+      const target = clamp(state.boatDock + direction, 0, SHORE_DOCK);
+      if (target !== state.boatDock) {
+        state.boatDock = target;
+        nextBoatMoveStep = state.step + BOAT_MOVE_INTERVAL;
       }
     }
 
-    // 4. Spawning: parachutists, then sharks. Fixed order.
+    // 2. Touching the shore delivers everyone aboard, in this same step. The
+    //    boat is never held there, so the player is never not playing.
+    if (state.boatDock === SHORE_DOCK && state.aboard > 0) deliver();
+
+    // 3. Spawning: parachutists, then sharks. Fixed order.
     if (state.step >= nextSpawnStep) {
       spawnParachutist();
       const base = ramp(SPAWN_INTERVAL_START, SPAWN_INTERVAL_END, level);
@@ -285,7 +280,7 @@ export function createParachuteGame({ seed } = {}) {
       nextSharkStep = state.step + Math.max(SHARK_INTERVAL_MIN, base);
     }
 
-    // 5. Sharks. A shark reaching the boat takes everyone aboard; an empty
+    // 4. Sharks. A shark reaching the boat takes everyone aboard; an empty
     //    boat is ignored, so the danger scales with what the player is
     //    carrying -- which is exactly what makes "one more catch" a gamble.
     {
@@ -299,7 +294,10 @@ export function createParachuteGame({ seed } = {}) {
         }
         if (shark.pos < 0 || shark.pos > LANES - 1) continue; // swum off, drop it
 
-        if (shark.pos === state.boatDock && state.aboard > 0 && state.unloadUntil === 0) {
+        // No check for being ashore: SHORE_DOCK is past every lane and a
+        // shark off the lanes has already been dropped, so a docked boat is
+        // unreachable by construction.
+        if (shark.pos === state.boatDock && state.aboard > 0) {
           state.aboard = 0;
           state.sharkFlash = SHARK_FLASH_STEPS;
           if (SHARK_COSTS_LIFE) state.misses += 1;
@@ -309,7 +307,7 @@ export function createParachuteGame({ seed } = {}) {
       sharks.length = write;
     }
 
-    // 6. Parachutists.
+    // 5. Parachutists.
     const fallInterval = ramp(FALL_INTERVAL_START, FALL_INTERVAL_END, level);
     const list = state.parachutists;
     let write = 0;
@@ -326,9 +324,9 @@ export function createParachuteGame({ seed } = {}) {
         }
 
         if (p.stop === DECK_STOP) {
-          // Caught only if the boat is here, has room, and is not at shore.
-          const canCatch =
-            state.boatDock === p.lane && state.aboard < CAPACITY && state.unloadUntil === 0;
+          // Caught only if the boat is in this lane and has room. Being at
+          // the shore needs no test of its own: SHORE_DOCK is not a lane.
+          const canCatch = state.boatDock === p.lane && state.aboard < CAPACITY;
           if (canCatch) {
             state.aboard += 1;
             continue; // aboard -- drop from the list. No points yet.
@@ -348,7 +346,7 @@ export function createParachuteGame({ seed } = {}) {
     if (state.missFlash > 0) state.missFlash -= 1;
     if (state.sharkFlash > 0) state.sharkFlash -= 1;
 
-    // 7. End conditions.
+    // 6. End conditions.
     state.step += 1;
     if (state.misses >= MAX_MISSES) {
       state.phase = 'ended';

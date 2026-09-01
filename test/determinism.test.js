@@ -246,7 +246,6 @@ function recordInputScript(seed, steps) {
  * test would catch a game that silently stopped registering catches.
  */
 function chasePolicy(state) {
-  if (state.unloadUntil > 0) return { left: false, right: false };
   // Full boat: the only legal move is the shore.
   if (state.aboard >= CAPACITY) {
     return { left: state.boatDock > SHORE_DOCK, right: state.boatDock < SHORE_DOCK };
@@ -268,7 +267,7 @@ function playScripted(seed, script) {
     game.update(script[step]);
     const s = game.state;
     trace.push(
-      `${s.step}|${s.score}|${s.rescued}|${s.aboard}|${s.misses}|${s.boatDock}|${s.unloadUntil}|` +
+      `${s.step}|${s.score}|${s.rescued}|${s.aboard}|${s.misses}|${s.boatDock}|` +
       `${s.parachutists.map((p) => `${p.id}:${p.lane}:${p.stop}:${p.doomed ? 1 : 0}`).join(';')}|` +
       `${s.sharks.map((k) => `${k.id}:${k.pos}:${k.dir}`).join(';')}`
     );
@@ -349,16 +348,20 @@ check(
 //      around them, so no pre-rescue run could survive unchanged;
 //   3. when the unload was shortened and paid for with open water between the
 //      last lane and the shore, which changes both the dock range the boat
-//      moves over and when deliveries land, and so the spawn ramp with them.
+//      moves over and when deliveries land, and so the spawn ramp with them;
+//   4. when the unload became instant and SHORE_GAP grew to 5 to pay for it.
+//      The dock range widened again, and delivery now lands on the step the
+//      boat touches the shore rather than 50 steps later, so every rescue in
+//      a run shifts and the difficulty ramp shifts under it.
 const GOLDEN = {
   seed: 12345,
   scriptSeed: 31,
-  score: 60,
-  rescued: 4,
+  score: 30,
+  rescued: 3,
   misses: 4,
-  step: 1178,
+  step: 1075,
   endReason: 'misses',
-  trace: 'eabb8c8608dd0241',
+  trace: '5c5f1174d2aff56c',
 };
 const golden = playScripted(GOLDEN.seed, recordInputScript(GOLDEN.scriptSeed, RUN_STEPS));
 const goldenRun = golden.state;
