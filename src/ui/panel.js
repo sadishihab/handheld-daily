@@ -6,6 +6,8 @@
  * than innerHTML.
  */
 
+import { displayPuzzleNumber } from '../daily.js';
+
 const el = (id) => document.getElementById(id);
 
 export function createPanel() {
@@ -57,7 +59,7 @@ export function createPanel() {
     /** Pre-run screen for a day that has not been played. */
     showStart({ puzzle, date, streak, onPlay, onPractice }) {
       reset();
-      eyebrow.textContent = `PUZZLE #${puzzle} · ${date}`;
+      eyebrow.textContent = `PUZZLE #${displayPuzzleNumber(puzzle)} · ${date}`;
       title.textContent = 'HANDHELD DAILY';
       if (streak > 1) addStat('STREAK', `${streak} days`);
       note.textContent = 'One run per day. Make it count.';
@@ -73,7 +75,7 @@ export function createPanel() {
      */
     showResult({ puzzle, score, rescued, misses, streak, endReason, justPlayed, onShare, onPractice }) {
       reset();
-      eyebrow.textContent = `PUZZLE #${puzzle}`;
+      eyebrow.textContent = `PUZZLE #${displayPuzzleNumber(puzzle)}`;
       title.textContent = justPlayed
         ? endReason === 'time'
           ? 'TIME UP'

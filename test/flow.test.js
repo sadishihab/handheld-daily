@@ -143,10 +143,59 @@ ok('leaving practice clears the practice mark', !dom.ids.lcd.classList.contains(
   await import(`${ROOT}main.js?boot=${bootCount}`);
   const eyebrow = publicDom.ids['panel-eyebrow'].textContent;
   // Derived from the real clock, not hardcoded: a fixed date here silently
-  // rots the moment the day rolls over.
-  const { puzzleNumber } = await import('../src/daily.js');
-  const realPuzzle = puzzleNumber(Date.now());
-  ok('a public host ignores ?date', eyebrow.includes(`#${realPuzzle}`), `${eyebrow} (expected #${realPuzzle})`);
+  // rots the moment the day rolls over. The date half is what carries the
+  // assertion -- before launch every real day clamps to #1 on screen, so the
+  // number alone could agree with the override by accident.
+  const { puzzleNumber, displayPuzzleNumber, utcDateString } = await import('../src/daily.js');
+  const realPuzzle = displayPuzzleNumber(puzzleNumber(Date.now()));
+  const realDate = utcDateString(Date.now());
+  ok('a public host ignores ?date',
+     eyebrow.includes(`#${realPuzzle}`) && eyebrow.includes(realDate),
+     `${eyebrow} (expected #${realPuzzle} and ${realDate})`);
+}
+
+// --- a pre-launch date must never put a zero or negative number on screen
+//
+// LAUNCH_DATE_UTC is a placeholder in the future, so this is the state every
+// real visit is in today: puzzleNumber() returns something like -60, and the
+// screens and the share card have to clamp it. Walks the whole ritual rather
+// than checking one string, because the number is rendered in three places.
+{
+  const cleanStorage = createMemoryStorage();
+  const { LAUNCH_DATE_UTC } = await import('../src/daily.js');
+  const wellBeforeLaunch = new Date(Date.parse(`${LAUNCH_DATE_UTC}T00:00:00Z`) - 86400000 * 91)
+    .toISOString()
+    .slice(0, 10);
+
+  const earlyDom = installDom({
+    hostname: 'localhost',
+    search: `?date=${wellBeforeLaunch}`,
+    storage: cleanStorage,
+  });
+  bootCount++;
+  await import(`${ROOT}main.js?boot=${bootCount}`);
+
+  /** The number the eyebrow is showing, whatever it is. */
+  const shownPuzzle = () => Number(/#(-?\d+)/.exec(earlyDom.ids['panel-eyebrow'].textContent)?.[1]);
+
+  ok('the raw puzzle number really is negative here',
+     window.handheldDaily.daily.puzzle < 0, `puzzle ${window.handheldDaily.daily.puzzle}`);
+  ok('the start screen shows puzzle 1, not a negative number',
+     shownPuzzle() === 1, earlyDom.ids['panel-eyebrow'].textContent);
+
+  earlyDom.click('PLAY');
+  playToEnd(earlyDom);
+  ok('the result screen shows puzzle 1, not a negative number',
+     shownPuzzle() === 1, earlyDom.ids['panel-eyebrow'].textContent);
+
+  earlyDom.click('SHARE');
+  await new Promise((r) => setTimeout(r, 10));
+  const earlyShare = earlyDom.clipboard.written[0] || '';
+  ok('the share card shows puzzle 1, not a negative number',
+     earlyShare.startsWith('HANDHELD DAILY #1  '), JSON.stringify(earlyShare));
+  ok('nothing user-facing carries a zero or negative puzzle number',
+     !/#(-\d+|0\b)/.test(earlyShare + ' ' + earlyDom.ids['panel-eyebrow'].textContent),
+     JSON.stringify(earlyShare));
 }
 
 console.log(`\n${failed === 0 ? 'all good' : failed + ' failed'}`);

@@ -11,7 +11,7 @@ import { createProgress } from '../src/progress.js';
 import { createMemoryStorage } from '../src/storage.js';
 import { formatShareText } from '../src/share.js';
 import { readDevClock, createClock, isDevHost } from '../src/devtime.js';
-import { puzzleNumber, LAUNCH_DATE_UTC } from '../src/daily.js';
+import { puzzleNumber, displayPuzzleNumber, LAUNCH_DATE_UTC } from '../src/daily.js';
 
 let passed = 0;
 let failed = 0;
@@ -188,6 +188,45 @@ console.log('daily ritual\n');
 {
   const full = formatShareText({ puzzle: 5, rescued: 60, streak: 2, steps: 3600, totalSteps: 3600 });
   check('a full run fills the bar', full.includes('▓'.repeat(10)), JSON.stringify(full));
+}
+
+// --- puzzle numbers a player is allowed to see
+//
+// LAUNCH_DATE_UTC is still a placeholder in the future, so puzzleNumber() is
+// negative for every real date until it lands. That is fine internally -- the
+// lockout and streak rules only need it to be monotonic -- but "PUZZLE #-60"
+// on the result screen and "HANDHELD DAILY #-60" on a share card are not.
+{
+  check('a date before launch clamps to puzzle 1', displayPuzzleNumber(-60) === 1);
+  check('the day before launch clamps to puzzle 1', displayPuzzleNumber(0) === 1);
+  check('launch day is left alone', displayPuzzleNumber(1) === 1);
+  check('a date after launch is left alone', displayPuzzleNumber(7) === 7);
+  check('a garbage value still renders something playable', displayPuzzleNumber(NaN) === 1);
+
+  // The clamp belongs at the render boundary, not at the source. If someone
+  // ever "fixes" puzzleNumber() itself, hasPlayed() and record() stop being
+  // able to order days across the launch boundary and the dev clock's
+  // ?days=-N override silently stops working.
+  const beforeLaunch = Date.parse(`${LAUNCH_DATE_UTC}T00:00:00Z`) - 86400000 * 3;
+  check(
+    'the raw puzzle number is still allowed below 1',
+    puzzleNumber(beforeLaunch) === -2,
+    `got ${puzzleNumber(beforeLaunch)}`
+  );
+  check(
+    'raw numbers before launch still order correctly',
+    puzzleNumber(beforeLaunch) < puzzleNumber(beforeLaunch + 86400000)
+  );
+
+  // The share card is the copy that leaves the device, so it is the one that
+  // would be embarrassing.
+  const early = formatShareText({ puzzle: -60, rescued: 12, streak: 1, steps: 1800, totalSteps: 3600 });
+  check('share text clamps a pre-launch puzzle number',
+    early.startsWith('HANDHELD DAILY #1  '), JSON.stringify(early));
+  check('share text never shows a negative or zero puzzle number',
+    !/#(-\d+|0\b)/.test(early), JSON.stringify(early));
+  check('share text clamps puzzle zero too',
+    formatShareText({ puzzle: 0, rescued: 1, streak: 1, steps: 60 }).startsWith('HANDHELD DAILY #1  '));
 }
 
 // --- dev clock

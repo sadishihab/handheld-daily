@@ -6,6 +6,7 @@
  */
 
 import { RUN_STEPS } from './games/parachute.js';
+import { displayPuzzleNumber } from './daily.js';
 
 const BAR_LENGTH = 10;
 const BAR_FILLED = '▓'; // ▓
@@ -29,7 +30,10 @@ export function formatShareText({ puzzle, rescued, streak, steps, totalSteps = R
   const filled = Math.min(BAR_LENGTH, Math.max(1, Math.round(ratio * BAR_LENGTH)));
   const bar = BAR_FILLED.repeat(filled) + BAR_EMPTY.repeat(BAR_LENGTH - filled);
 
-  const lines = [`HANDHELD DAILY #${puzzle}  \u{1FA82}`, `${rescued} rescued  ${bar}`];
+  const lines = [
+    `HANDHELD DAILY #${displayPuzzleNumber(puzzle)}  \u{1FA82}`,
+    `${rescued} rescued  ${bar}`,
+  ];
 
   // A "1 day streak" is just "played today", so it is left off.
   if (streak > 1) lines.push(`\u{1F525} ${streak} day streak`);

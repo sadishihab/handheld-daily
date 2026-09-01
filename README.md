@@ -120,7 +120,8 @@ Runs three suites with Node -- no framework, no `npm install` needed.
   its recorded golden fingerprint.
 - `progress.test.js` -- streaks increment on consecutive days and reset after a
   gap, a day cannot be played twice, share text is exactly the intended shape,
-  and the dev clock is refused off a dev host.
+  the dev clock is refused off a dev host, and a pre-launch date clamps to
+  puzzle #1 rather than rendering the negative number it counts internally.
 - `styles.test.js` -- asserts the cascade rules the UI depends on, chiefly that
   `[hidden]` beats the author `display` rules that would otherwise defeat it.
 - `render.test.js` -- drives the renderer against a recording canvas: every
@@ -129,7 +130,9 @@ Runs three suites with Node -- no framework, no `npm install` needed.
   cell an entity can use, and the readout band holds the score, the miss lamps
   and the time bar and nothing else.
 - `flow.test.js` -- boots the real `src/main.js` against a mini-DOM and walks
-  the whole ritual: play, lock out, roll over to the next day, share, practice.
+  the whole ritual: play, lock out, roll over to the next day, share, practice,
+  and the same walk on a date before launch, where every screen and the share
+  card must still read #1.
 
 The split matters: `flow.test.js` drives a DOM stub with no CSS cascade, so a
 rule that visually defeats `element.hidden` is invisible to it. Anything that

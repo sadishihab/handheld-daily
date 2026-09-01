@@ -98,6 +98,9 @@ function utcMidnight(when) {
  * Puzzle number, counting whole UTC days from LAUNCH_DATE_UTC.
  * Launch day is puzzle #1. Dates before launch return a value < 1.
  *
+ * That value is internal. Anything about to put it in front of a player goes
+ * through displayPuzzleNumber() below -- do not clamp it here.
+ *
  * @param {Date|number} [when] Date or epoch ms. Defaults to now.
  * @returns {number} Integer.
  */
@@ -106,6 +109,27 @@ export function puzzleNumber(when = Date.now()) {
   // Both operands are exact UTC midnights, so this division is whole-number
   // clean -- no DST or leap-second drift to round away.
   return Math.floor((utcMidnight(when) - launch) / MS_PER_DAY) + 1;
+}
+
+/**
+ * The puzzle number as a player may see it: never zero, never negative.
+ *
+ * puzzleNumber() counts from LAUNCH_DATE_UTC and is deliberately allowed to
+ * run below 1. That is what makes the dev clock useful before launch -- you
+ * can wind past day one in either direction and the ordering still holds, so
+ * hasPlayed() and record() keep working across the boundary. None of it
+ * belongs on screen: "PUZZLE #-60" is not a puzzle anyone can play, and it
+ * advertises a launch date that is still a placeholder.
+ *
+ * So the clamp lives here, at the render boundary, and is applied by whatever
+ * draws the number rather than by whatever computes it. The internal value
+ * stays honest.
+ *
+ * @param {number} puzzle Raw puzzle number, possibly < 1.
+ * @returns {number} Integer >= 1.
+ */
+export function displayPuzzleNumber(puzzle) {
+  return Number.isFinite(puzzle) ? Math.max(1, Math.floor(puzzle)) : 1;
 }
 
 /**
