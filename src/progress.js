@@ -79,7 +79,7 @@ export function createProgress(storage) {
    *
    * @returns {{recorded: boolean, streak: number}}
    */
-  function record({ puzzle, score, misses, endReason, steps, date }) {
+  function record({ puzzle, score, rescued, misses, endReason, steps, date }) {
     if (!Number.isInteger(puzzle)) throw new TypeError('record: puzzle must be an integer');
 
     // Replaying a day already played, or an earlier one, changes nothing.
@@ -90,7 +90,7 @@ export function createProgress(storage) {
     const consecutive = data.lastPuzzle !== null && puzzle === data.lastPuzzle + 1;
     data.streak = consecutive ? data.streak + 1 : 1;
     data.lastPuzzle = puzzle;
-    data.history.unshift({ puzzle, score, misses, endReason, steps, date });
+    data.history.unshift({ puzzle, score, rescued, misses, endReason, steps, date });
     if (data.history.length > HISTORY_LIMIT) data.history.length = HISTORY_LIMIT;
 
     write();

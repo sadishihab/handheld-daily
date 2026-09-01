@@ -16,7 +16,8 @@ import {
   MAX_MISSES,
   LANES,
   STOPS,
-  DOCKS,
+  SHORE_DOCK,
+  CAPACITY,
   SPLASH_STOP,
 } from '../src/games/parachute.js';
 import {
@@ -242,6 +243,11 @@ function recordInputScript(seed, steps) {
  * test would catch a game that silently stopped registering catches.
  */
 function chasePolicy(state) {
+  if (state.unloadUntil > 0) return { left: false, right: false };
+  // Full boat: the only legal move is the shore.
+  if (state.aboard >= CAPACITY) {
+    return { left: state.boatDock > SHORE_DOCK, right: state.boatDock < SHORE_DOCK };
+  }
   let target = null;
   for (const p of state.parachutists) {
     if (p.doomed) continue;
@@ -258,7 +264,11 @@ function playScripted(seed, script) {
   for (let step = 0; step < script.length && !game.isOver; step++) {
     game.update(script[step]);
     const s = game.state;
-    trace.push(`${s.step}|${s.score}|${s.misses}|${s.boatDock}|${s.parachutists.map((p) => `${p.id}:${p.lane}:${p.stop}:${p.doomed ? 1 : 0}`).join(';')}`);
+    trace.push(
+      `${s.step}|${s.score}|${s.rescued}|${s.aboard}|${s.misses}|${s.boatDock}|${s.unloadUntil}|` +
+      `${s.parachutists.map((p) => `${p.id}:${p.lane}:${p.stop}:${p.doomed ? 1 : 0}`).join(';')}|` +
+      `${s.sharks.map((k) => `${k.id}:${k.pos}:${k.dir}`).join(';')}`
+    );
   }
   return { game, trace: trace.join('\n'), state: game.state };
 }
@@ -269,14 +279,14 @@ function playReactive(seed) {
   while (!game.isOver) {
     game.update(chasePolicy(game.state));
     const s = game.state;
-    trace.push(`${s.step}|${s.score}|${s.misses}|${s.boatDock}`);
+    trace.push(`${s.step}|${s.score}|${s.rescued}|${s.aboard}|${s.misses}|${s.boatDock}`);
   }
   return { game, trace: trace.join('\n'), state: game.state };
 }
 
-// Seed 109 gives a script that actually catches parachutists; a script that
+// Seed 31 gives a script that actually delivers survivors; a script that
 // scores zero would let the final-score assertion below pass on 0 === 0.
-const script = recordInputScript(109, RUN_STEPS);
+const script = recordInputScript(31, RUN_STEPS);
 
 const scriptedA = playScripted(12345, script);
 const scriptedB = playScripted(12345, script);
@@ -305,7 +315,7 @@ check(
   scriptedOtherSeed.trace !== scriptedA.trace
 );
 
-const otherScript = recordInputScript(6, RUN_STEPS);
+const otherScript = recordInputScript(15, RUN_STEPS);
 check(
   'a different input script changes the run',
   playScripted(12345, otherScript).trace !== scriptedA.trace
@@ -320,20 +330,22 @@ check(
 // results players have already shared, so treat a failure here as a
 // deliberate decision rather than a number to re-baseline.
 //
-// Re-baselined when positions became discrete LCD segments (lanes and stops
-// instead of columns and fixed-point rows). That change altered the RNG draw
-// ranges and the difficulty tuning, so every seeded run is different from the
-// pre-segment build by design. The game is still unreleased, so no shared
-// result was invalidated.
-const GOLDEN = { seed: 12345, scriptSeed: 109, score: 4, misses: 3, step: 787, endReason: 'misses' };
+// Re-baselined twice, both before release:
+//   1. when positions became discrete LCD segments (lanes and stops rather
+//      than columns and fixed-point rows);
+//   2. when the rescue loop landed -- boat capacity, the shore run and sharks
+//      all draw from the same RNG stream, and the difficulty ramp was retuned
+//      around them, so no pre-rescue run could survive unchanged.
+const GOLDEN = { seed: 12345, scriptSeed: 31, score: 60, rescued: 4, misses: 4, step: 1178, endReason: 'misses' };
 const goldenRun = playScripted(GOLDEN.seed, recordInputScript(GOLDEN.scriptSeed, RUN_STEPS)).state;
 check(
   'seeded run still produces its recorded outcome (golden fingerprint)',
   goldenRun.score === GOLDEN.score &&
+    goldenRun.rescued === GOLDEN.rescued &&
     goldenRun.misses === GOLDEN.misses &&
     goldenRun.step === GOLDEN.step &&
     goldenRun.endReason === GOLDEN.endReason,
-  `got score ${goldenRun.score}, misses ${goldenRun.misses}, step ${goldenRun.step}, ${goldenRun.endReason}`
+  `got score ${goldenRun.score}, rescued ${goldenRun.rescued}, misses ${goldenRun.misses}, step ${goldenRun.step}, ${goldenRun.endReason}`
 );
 
 // Positions are discrete LCD segments: small integers, never between cells.
@@ -351,12 +363,17 @@ check(
     const s = game.state;
 
     if (!Number.isInteger(s.boatDock)) allIntegers = false;
-    if (s.boatDock < 0 || s.boatDock >= DOCKS) boatInRange = false;
+    if (s.boatDock < 0 || s.boatDock > SHORE_DOCK) boatInRange = false;
 
     for (const p of s.parachutists) {
       if (!Number.isInteger(p.lane) || !Number.isInteger(p.stop)) allIntegers = false;
       if (p.lane < 0 || p.lane >= LANES) allInRange = false;
       if (p.stop < 0 || p.stop > SPLASH_STOP) allInRange = false;
+    }
+
+    for (const k of s.sharks) {
+      if (!Number.isInteger(k.pos)) allIntegers = false;
+      if (k.pos < -1 || k.pos > LANES) allInRange = false;
     }
   }
 
@@ -367,8 +384,14 @@ check(
 
 check(
   'the layout is a small fixed set of segments',
-  Number.isInteger(LANES) && Number.isInteger(STOPS) && DOCKS === LANES && STOPS > 1,
-  `${LANES} lanes, ${STOPS} stops, ${DOCKS} docks`
+  Number.isInteger(LANES) && Number.isInteger(STOPS) && SHORE_DOCK === LANES && STOPS > 1,
+  `${LANES} lanes, ${STOPS} stops, shore at ${SHORE_DOCK}`
+);
+
+check(
+  'the boat capacity is an integer count',
+  Number.isInteger(CAPACITY) && CAPACITY > 1,
+  `capacity ${CAPACITY}`
 );
 
 const reactiveA = playReactive(12345);
@@ -381,14 +404,26 @@ check(
 // Guards against the game silently scoring nothing, which would make every
 // determinism assertion above pass on a broken game.
 check(
-  'a competent player actually scores',
-  reactiveA.state.score > 10,
-  `scored ${reactiveA.state.score}`
+  'a competent player actually delivers survivors',
+  reactiveA.state.rescued > 4 && reactiveA.state.score > 0,
+  `rescued ${reactiveA.state.rescued}, score ${reactiveA.state.score}`
+);
+
+check(
+  'catching alone never scores -- only delivery does',
+  (() => {
+    // Never move: the boat can still be landed on at its starting dock, but
+    // it never reaches the shore, so nothing may score.
+    const stuck = createParachuteGame({ seed: 4242 });
+    while (!stuck.isOver) stuck.update({ left: false, right: false });
+    return stuck.state.score === 0 && stuck.state.rescued === 0;
+  })(),
+  'a run that never reached shore still scored'
 );
 
 // Both end conditions must be reachable.
 check(
-  'three misses ends the run early',
+  'running out of lives ends the run early',
   (() => {
     const idle = createParachuteGame({ seed: 12345 });
     while (!idle.isOver) idle.update({ left: false, right: false });
@@ -401,7 +436,7 @@ check(
 );
 
 check(
-  'a run that avoids three misses ends on the clock',
+  'a run that keeps its lives ends on the clock',
   (() => {
     // Seed 7 is survivable by the chase policy for the full minute.
     const timed = playReactive(7);

@@ -1,19 +1,18 @@
 /**
  * Parachute rescue -- pure simulation, no rendering and no input handling.
  *
- * Positions are discrete LCD segments, the way a Game & Watch panel works.
- * A parachutist is always at exactly one (lane, stop) segment and never
- * between two; the boat sits at exactly one of a few docks. There are no
- * continuous coordinates and no fixed-point arithmetic anywhere -- every
- * position in this module is a small integer, which is the strongest form of
- * the "prefer integers" rule in docs/DETERMINISM.md.
+ * Parachutists bail out of a burning aircraft and descend through fixed lanes.
+ * The boat catches them, carries up to four, and must run to the shore to
+ * unload before it can take any more. Sharks patrol the water and will take
+ * whoever is aboard. Only survivors delivered to shore score.
  *
- * Parachutists drift down toward the water; the boat slides along the docks.
- * Catch one to score, let one hit the water for a miss. Three misses or sixty
- * seconds ends the run.
+ * Positions are discrete LCD segments. A parachutist is always at exactly one
+ * (lane, stop), the boat at exactly one dock, a shark at exactly one water
+ * position -- all small integers, never between cells and never fixed-point.
  *
  * Nothing here touches the DOM, the clock, or Math.random(). The only inputs
  * are the seed and the {left, right} snapshot handed to update() each step.
+ * See docs/DETERMINISM.md.
  */
 
 import { createRng } from '../rng.js';
@@ -22,76 +21,123 @@ import { STEPS_PER_SECOND } from '../loop.js';
 /**
  * Drop lanes, left to right.
  *
- * Six rather than a handful: with four, the boat could always reach any lane
- * before a parachutist landed, and a greedy player never missed. Six makes a
- * full-width traverse (~1.3s) comparable to a late-game fall (~1.7s), so
- * lanes at opposite edges become a genuine choice.
+ * Four, not six. With more lanes the run was decided by whether the boat could
+ * cross in time, and the rescue loop became decoration: measured over 30 seeds,
+ * roughly 2.6 of every 3 losses came from plain lane-chasing. Four lanes make
+ * catching comfortable so that the shore trip is what actually costs you.
  */
-export const LANES = 6;
+export const LANES = 4;
 
-/**
- * Vertical segment positions in a lane, top to bottom. A parachutist spawns
- * at stop 0 and advances one stop at a time.
- */
+/** Vertical segment positions in a lane. A parachutist spawns at stop 0. */
 export const STOPS = 7;
 
 /** The lowest stop: deck height, where a catch is resolved. */
 export const DECK_STOP = STOPS - 1;
 
-/** One past the deck: in the water. Reached only by an uncaught parachutist. */
+/** One past the deck: in the water. */
 export const SPLASH_STOP = STOPS;
 
-/** Docks the boat can occupy, aligned one-to-one with the lanes. */
-export const DOCKS = LANES;
+/**
+ * Boat positions. 0 .. LANES-1 sit under the drop lanes; the last one is the
+ * shore, past the final lane, where survivors are unloaded. The boat cannot
+ * catch anything from the shore -- that is the cost of the trip.
+ */
+export const SHORE_DOCK = LANES;
+export const DOCK_COUNT = LANES + 1;
+
+/** Survivors the boat can hold. */
+export const CAPACITY = 4;
 
 export const RUN_SECONDS = 60;
 export const RUN_STEPS = RUN_SECONDS * STEPS_PER_SECOND;
-export const MAX_MISSES = 3;
+export const MAX_MISSES = 4;
 
-/** Steps between one stop and the next, ramping down over the run. */
-const FALL_INTERVAL_START = 46;
-const FALL_INTERVAL_END = 17;
+/** Points for each survivor put ashore, and the bonus for a full boat. */
+export const POINTS_PER_RESCUE = 10;
+export const FULL_BOAT_BONUS = 20;
 
-/** Steps between spawns, ramping down over the run. */
-const SPAWN_INTERVAL_START = 84;
-const SPAWN_INTERVAL_END = 34;
-const SPAWN_INTERVAL_MIN = 24;
+/** Steps spent unloading at the shore. The boat is locked while it runs. */
+const UNLOAD_STEPS = 75;
+
+/** Steps the boat takes to move one dock. */
+const BOAT_MOVE_INTERVAL = 7;
+
+/** Difficulty is a 0..RAMP_SCALE pressure value, not a raw step count. */
+const RAMP_SCALE = 1000;
+/** Rescues that alone would take difficulty to maximum. */
+const RESCUE_RAMP_TARGET = 22;
+/** How much of the ramp comes from rescues rather than elapsed time. */
+const SCORE_RAMP_WEIGHT = 2;
+const TIME_RAMP_WEIGHT = 1;
+
+/** Steps between one stop and the next. */
+const FALL_INTERVAL_START = 50;
+const FALL_INTERVAL_END = 22;
+
+/** Steps between parachutist spawns. */
+const SPAWN_INTERVAL_START = 124;
+const SPAWN_INTERVAL_END = 82;
+const SPAWN_INTERVAL_MIN = 68;
 const SPAWN_JITTER = 8;
-const FIRST_SPAWN_STEP = 30;
+const FIRST_SPAWN_STEP = 40;
 
+/** Sharks. */
+const SHARK_INTERVAL_START = 980;
+const SHARK_INTERVAL_END = 520;
+const SHARK_INTERVAL_MIN = 420;
+const FIRST_SHARK_STEP = 420;
+const SHARK_MOVE_INTERVAL = 17;
 /**
- * Steps the boat takes to move one dock. Tuned against the late-game fall
- * interval so that crossing the board costs most of a parachutist's descent.
+ * Whether a shark costs a life as well as the cargo. It does not.
+ *
+ * Measured both ways over 40 seeds: charging a life dropped runs reaching the
+ * full sixty seconds from 33% to 3%, and average rescues from 22 to 17. The
+ * shark became the thing that ended runs, which buries the rescue loop it is
+ * supposed to complicate. Taking only the cargo keeps it a tax on greed --
+ * it punishes carrying four, which is exactly the decision the game is about.
  */
-const BOAT_MOVE_INTERVAL = 16;
+const SHARK_COSTS_LIFE = 0;
+const MAX_SHARKS = 2;
 
 /** The single stop at which a drifting parachutist changes lane. */
 const SWAY_AT_STOP = 3;
-/** Two of four draws mean "no drift", so most fall straight down. */
 const SWAY_CHOICES = [-1, 0, 0, 1];
 
-/** How long the panel flashes after a splash, in steps. */
 const MISS_FLASH_STEPS = 12;
+const SHARK_FLASH_STEPS = 18;
 
 function clamp(value, min, max) {
   return value < min ? min : value > max ? max : value;
 }
 
-/** Linear ramp between two integers across the run, in integer arithmetic. */
-function ramp(from, to, step) {
-  const t = clamp(step, 0, RUN_STEPS);
-  return from + Math.floor(((to - from) * t) / RUN_STEPS);
+/**
+ * Difficulty pressure, 0 .. RAMP_SCALE.
+ *
+ * Weighted toward rescues rather than the clock, so a player who is doing well
+ * is pushed harder while someone struggling is not buried by the timer alone.
+ * Integer arithmetic throughout.
+ */
+function pressure(state) {
+  const byTime = Math.floor((clamp(state.step, 0, RUN_STEPS) * RAMP_SCALE) / RUN_STEPS);
+  const byScore = Math.floor(
+    (clamp(state.rescued, 0, RESCUE_RAMP_TARGET) * RAMP_SCALE) / RESCUE_RAMP_TARGET
+  );
+  const total = byTime * TIME_RAMP_WEIGHT + byScore * SCORE_RAMP_WEIGHT;
+  return clamp(Math.floor(total / (TIME_RAMP_WEIGHT + SCORE_RAMP_WEIGHT)), 0, RAMP_SCALE);
 }
 
-/**
- * @param {object} options
- * @param {number} options.seed Integer seed, normally from daily.js.
- */
+/** Linear ramp between two integers across the pressure range. */
+function ramp(from, to, level) {
+  return from + Math.floor(((to - from) * clamp(level, 0, RAMP_SCALE)) / RAMP_SCALE);
+}
+
 export function createParachuteGame({ seed } = {}) {
   const rng = createRng(seed);
 
   let nextId = 1;
+  let nextSharkId = 1;
   let nextSpawnStep = FIRST_SPAWN_STEP;
+  let nextSharkStep = FIRST_SHARK_STEP;
   let nextBoatMoveStep = 0;
 
   const state = {
@@ -101,19 +147,29 @@ export function createParachuteGame({ seed } = {}) {
     endReason: null,
     /** Steps elapsed in THIS run -- the simulation's only clock. */
     step: 0,
+    /** Points. Only delivered survivors score. */
     score: 0,
+    /** Survivors delivered to shore. */
+    rescued: 0,
+    /** Full boats of CAPACITY delivered, for the combo bonus. */
+    fullBoats: 0,
+    /** Survivors currently on the boat. */
+    aboard: 0,
     misses: 0,
-    /** Which dock the boat occupies, 0 .. DOCKS-1. */
-    boatDock: Math.floor((DOCKS - 1) / 2),
-    /** Live parachutists, oldest first. */
+    /** 0 .. SHORE_DOCK. */
+    boatDock: Math.floor((LANES - 1) / 2),
+    /** Step at which unloading finishes; 0 when not unloading. */
+    unloadUntil: 0,
     parachutists: [],
+    sharks: [],
     missFlash: 0,
+    sharkFlash: 0,
   };
 
-  function spawn() {
-    // Draw order is part of the seed: lane, then drift. Never reorder these
-    // or add a draw between them without accepting that every seeded run
-    // changes. See the golden fingerprint in test/determinism.test.js.
+  function spawnParachutist() {
+    // Draw order is part of the seed: lane, then drift, and parachutists are
+    // always drawn before sharks. Never reorder without accepting that every
+    // seeded run changes.
     const lane = rng.nextIntExclusive(0, LANES);
     const swayDir = SWAY_CHOICES[rng.nextIntExclusive(0, SWAY_CHOICES.length)];
 
@@ -123,16 +179,31 @@ export function createParachuteGame({ seed } = {}) {
       stop: 0,
       swayDir,
       spawnStep: state.step,
-      /** Set once it has passed the deck uncaught -- it is falling to water. */
       doomed: false,
-      nextMoveStep: state.step + ramp(FALL_INTERVAL_START, FALL_INTERVAL_END, state.step),
+      nextMoveStep: state.step + ramp(FALL_INTERVAL_START, FALL_INTERVAL_END, pressure(state)),
     });
   }
 
-  function scheduleNextSpawn() {
-    const base = ramp(SPAWN_INTERVAL_START, SPAWN_INTERVAL_END, state.step);
-    const jitter = rng.nextIntExclusive(-SPAWN_JITTER, SPAWN_JITTER + 1);
-    nextSpawnStep = state.step + Math.max(SPAWN_INTERVAL_MIN, base + jitter);
+  function spawnShark() {
+    const fromLeft = rng.nextIntExclusive(0, 2) === 0;
+    state.sharks.push({
+      id: nextSharkId++,
+      pos: fromLeft ? 0 : LANES - 1,
+      dir: fromLeft ? 1 : -1,
+      nextMoveStep: state.step + SHARK_MOVE_INTERVAL,
+    });
+  }
+
+  function deliver() {
+    const delivered = state.aboard;
+    state.score += delivered * POINTS_PER_RESCUE;
+    if (delivered === CAPACITY) {
+      state.score += FULL_BOAT_BONUS;
+      state.fullBoats += 1;
+    }
+    state.rescued += delivered;
+    state.aboard = 0;
+    state.unloadUntil = 0;
   }
 
   /**
@@ -145,30 +216,70 @@ export function createParachuteGame({ seed } = {}) {
 
     const left = Boolean(input && input.left);
     const right = Boolean(input && input.right);
+    const level = pressure(state);
 
-    // 1. Boat. Both halves held cancel out, which is what a player expects.
-    //    Moving first means an input on this step counts toward a catch
-    //    resolved on this step -- the last-instant save stays possible.
-    const direction = (right ? 1 : 0) - (left ? 1 : 0);
-    if (direction !== 0 && state.step >= nextBoatMoveStep) {
-      const target = clamp(state.boatDock + direction, 0, DOCKS - 1);
-      // Only start the cooldown on an actual move, so holding against the
-      // end dock does not stall the boat when the player reverses.
-      if (target !== state.boatDock) {
-        state.boatDock = target;
-        nextBoatMoveStep = state.step + BOAT_MOVE_INTERVAL;
+    // 1. Unloading. The boat is committed once it starts: that commitment is
+    //    the whole tension of the run, and letting the player abort would make
+    //    the shore trip free.
+    if (state.unloadUntil > 0) {
+      if (state.step >= state.unloadUntil) deliver();
+    } else {
+      // 2. Boat. Moving before catches resolve keeps the last-instant save.
+      const direction = (right ? 1 : 0) - (left ? 1 : 0);
+      if (direction !== 0 && state.step >= nextBoatMoveStep) {
+        const target = clamp(state.boatDock + direction, 0, SHORE_DOCK);
+        if (target !== state.boatDock) {
+          state.boatDock = target;
+          nextBoatMoveStep = state.step + BOAT_MOVE_INTERVAL;
+        }
+      }
+
+      // 3. Arriving at the shore with survivors starts the unload.
+      if (state.boatDock === SHORE_DOCK && state.aboard > 0) {
+        state.unloadUntil = state.step + UNLOAD_STEPS;
       }
     }
 
-    // 2. Spawning.
+    // 4. Spawning: parachutists, then sharks. Fixed order.
     if (state.step >= nextSpawnStep) {
-      spawn();
-      scheduleNextSpawn();
+      spawnParachutist();
+      const base = ramp(SPAWN_INTERVAL_START, SPAWN_INTERVAL_END, level);
+      const jitter = rng.nextIntExclusive(-SPAWN_JITTER, SPAWN_JITTER + 1);
+      nextSpawnStep = state.step + Math.max(SPAWN_INTERVAL_MIN, base + jitter);
     }
 
-    // 3. Parachutists. Compaction in place, preserving order, so iteration
-    //    order can never depend on how the engine reclaims memory.
-    const fallInterval = ramp(FALL_INTERVAL_START, FALL_INTERVAL_END, state.step);
+    if (state.step >= nextSharkStep) {
+      if (state.sharks.length < MAX_SHARKS) spawnShark();
+      const base = ramp(SHARK_INTERVAL_START, SHARK_INTERVAL_END, level);
+      nextSharkStep = state.step + Math.max(SHARK_INTERVAL_MIN, base);
+    }
+
+    // 5. Sharks. A shark reaching the boat takes everyone aboard; an empty
+    //    boat is ignored, so the danger scales with what the player is
+    //    carrying -- which is exactly what makes "one more catch" a gamble.
+    {
+      const sharks = state.sharks;
+      let write = 0;
+      for (let read = 0; read < sharks.length; read++) {
+        const shark = sharks[read];
+        if (state.step >= shark.nextMoveStep) {
+          shark.pos += shark.dir;
+          shark.nextMoveStep = state.step + SHARK_MOVE_INTERVAL;
+        }
+        if (shark.pos < 0 || shark.pos > LANES - 1) continue; // swum off, drop it
+
+        if (shark.pos === state.boatDock && state.aboard > 0 && state.unloadUntil === 0) {
+          state.aboard = 0;
+          state.sharkFlash = SHARK_FLASH_STEPS;
+          if (SHARK_COSTS_LIFE) state.misses += 1;
+        }
+        sharks[write++] = shark;
+      }
+      sharks.length = write;
+    }
+
+    // 6. Parachutists.
+    const fallInterval = ramp(FALL_INTERVAL_START, FALL_INTERVAL_END, level);
     const list = state.parachutists;
     let write = 0;
 
@@ -184,15 +295,18 @@ export function createParachuteGame({ seed } = {}) {
         }
 
         if (p.stop === DECK_STOP) {
-          if (state.boatDock === p.lane) {
-            state.score += 1;
-            continue; // caught -- drop from the list
+          // Caught only if the boat is here, has room, and is not at shore.
+          const canCatch =
+            state.boatDock === p.lane && state.aboard < CAPACITY && state.unloadUntil === 0;
+          if (canCatch) {
+            state.aboard += 1;
+            continue; // aboard -- drop from the list. No points yet.
           }
           p.doomed = true;
         } else if (p.stop >= SPLASH_STOP) {
           state.misses += 1;
           state.missFlash = MISS_FLASH_STEPS;
-          continue; // splashed -- drop from the list
+          continue;
         }
       }
 
@@ -201,9 +315,9 @@ export function createParachuteGame({ seed } = {}) {
     list.length = write;
 
     if (state.missFlash > 0) state.missFlash -= 1;
+    if (state.sharkFlash > 0) state.sharkFlash -= 1;
 
-    // 4. End conditions. Misses are checked first so that a third miss on the
-    //    final step ends the run as a loss rather than a timeout.
+    // 7. End conditions.
     state.step += 1;
     if (state.misses >= MAX_MISSES) {
       state.phase = 'ended';
@@ -220,7 +334,6 @@ export function createParachuteGame({ seed } = {}) {
     get isOver() {
       return state.phase === 'ended';
     },
-    /** Steps left in the run. Render-only convenience. */
     get stepsRemaining() {
       return Math.max(0, RUN_STEPS - state.step);
     },

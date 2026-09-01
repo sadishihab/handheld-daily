@@ -90,16 +90,18 @@ function boot() {
     const result = justPlayed
       ? {
           score: game.state.score,
+          rescued: game.state.rescued,
           misses: game.state.misses,
           endReason: game.state.endReason,
           steps: game.state.step,
         }
-      : stored || { score: 0, misses: 0, endReason: 'misses', steps: 0 };
+      : stored || { score: 0, rescued: 0, misses: 0, endReason: 'misses', steps: 0 };
 
     resultIsFresh = justPlayed;
     panel.showResult({
       puzzle: daily.puzzle,
       score: result.score,
+      rescued: result.rescued || 0,
       misses: result.misses,
       streak: progress.streak,
       endReason: result.endReason,
@@ -134,7 +136,7 @@ function boot() {
   async function handleShare(result) {
     const text = formatShareText({
       puzzle: daily.puzzle,
-      score: result.score,
+      rescued: result.rescued || 0,
       streak: progress.streak,
       steps: result.steps,
     });
@@ -209,6 +211,7 @@ function boot() {
           progress.record({
             puzzle: daily.puzzle,
             score: game.state.score,
+            rescued: game.state.rescued,
             misses: game.state.misses,
             endReason: game.state.endReason,
             steps: game.state.step,
@@ -218,6 +221,7 @@ function boot() {
         } else {
           panel.showPracticeResult({
             score: game.state.score,
+            rescued: game.state.rescued,
             misses: game.state.misses,
             endReason: game.state.endReason,
             onAgain: startPractice,

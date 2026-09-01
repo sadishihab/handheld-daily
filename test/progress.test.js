@@ -34,6 +34,7 @@ function play(progress, puzzle, score = 10) {
   return progress.record({
     puzzle,
     score,
+    rescued: Math.floor(score / 10),
     misses: 3,
     endReason: 'misses',
     steps: 600,
@@ -163,7 +164,7 @@ console.log('daily ritual\n');
 
 // --- share text
 {
-  const text = formatShareText({ puzzle: 1, score: 47, streak: 6, steps: 2520, totalSteps: 3600 });
+  const text = formatShareText({ puzzle: 1, rescued: 47, streak: 6, steps: 2520, totalSteps: 3600 });
   const lines = text.split('\n');
   check('share text is three lines', lines.length === 3, JSON.stringify(text));
   check('line 1 names the puzzle', lines[0] === 'HANDHELD DAILY #1  \u{1FA82}', JSON.stringify(lines[0]));
@@ -179,13 +180,13 @@ console.log('daily ritual\n');
 }
 
 {
-  const solo = formatShareText({ puzzle: 5, score: 3, streak: 1, steps: 300, totalSteps: 3600 });
+  const solo = formatShareText({ puzzle: 5, rescued: 3, streak: 1, steps: 300, totalSteps: 3600 });
   check('a 1 day streak is omitted', solo.split('\n').length === 2, JSON.stringify(solo));
   check('a short run still shows one filled cell', solo.includes('▓░'), JSON.stringify(solo));
 }
 
 {
-  const full = formatShareText({ puzzle: 5, score: 60, streak: 2, steps: 3600, totalSteps: 3600 });
+  const full = formatShareText({ puzzle: 5, rescued: 60, streak: 2, steps: 3600, totalSteps: 3600 });
   check('a full run fills the bar', full.includes('▓'.repeat(10)), JSON.stringify(full));
 }
 

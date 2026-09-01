@@ -18,17 +18,18 @@ const BAR_EMPTY = '░'; // ░
  * characters WhatsApp treats as formatting (* _ ~ `). Lines are joined with
  * plain \n, which is what both WhatsApp and Messenger paste cleanly.
  *
- * The bar shows how far into the sixty seconds the run got, not the score --
- * the score is already on the line, and survival time is the part a raw
- * number does not convey.
+ * The headline number is survivors delivered, not points: "rescued" has to
+ * mean people. Points, which include the full-boat bonus, stay on the result
+ * screen. The bar shows how far into the sixty seconds the run got, which is
+ * the part neither number conveys.
  */
-export function formatShareText({ puzzle, score, streak, steps, totalSteps = RUN_STEPS }) {
+export function formatShareText({ puzzle, rescued, streak, steps, totalSteps = RUN_STEPS }) {
   const ratio = totalSteps > 0 ? steps / totalSteps : 0;
   // At least one filled cell: an all-empty bar reads as a broken message.
   const filled = Math.min(BAR_LENGTH, Math.max(1, Math.round(ratio * BAR_LENGTH)));
   const bar = BAR_FILLED.repeat(filled) + BAR_EMPTY.repeat(BAR_LENGTH - filled);
 
-  const lines = [`HANDHELD DAILY #${puzzle}  \u{1FA82}`, `${score} rescued  ${bar}`];
+  const lines = [`HANDHELD DAILY #${puzzle}  \u{1FA82}`, `${rescued} rescued  ${bar}`];
 
   // A "1 day streak" is just "played today", so it is left off.
   if (streak > 1) lines.push(`\u{1F525} ${streak} day streak`);

@@ -142,7 +142,10 @@ ok('leaving practice clears the practice mark', !dom.ids.lcd.classList.contains(
   bootCount++;
   await import(`${ROOT}main.js?boot=${bootCount}`);
   const eyebrow = publicDom.ids['panel-eyebrow'].textContent;
-  const realPuzzle = Math.floor((Date.UTC(2026, 7, 31) - Date.parse('2026-11-01T00:00:00Z')) / 86400000) + 1;
+  // Derived from the real clock, not hardcoded: a fixed date here silently
+  // rots the moment the day rolls over.
+  const { puzzleNumber } = await import('../src/daily.js');
+  const realPuzzle = puzzleNumber(Date.now());
   ok('a public host ignores ?date', eyebrow.includes(`#${realPuzzle}`), `${eyebrow} (expected #${realPuzzle})`);
 }
 

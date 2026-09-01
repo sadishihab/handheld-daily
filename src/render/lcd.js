@@ -15,7 +15,7 @@
 const MAX_PIXEL_RATIO = 3;
 
 /** Fraction of a cell left as a gap, giving the dot-matrix look. */
-const CELL_GAP_RATIO = 0.08;
+const CELL_GAP_RATIO = 0;
 
 function cssVar(element, name, fallback) {
   const value = getComputedStyle(element).getPropertyValue(name).trim();
@@ -37,7 +37,7 @@ export function createLcdSurface(canvas, { gridWidth, gridHeight }) {
   // Fallbacks only; the real values come from the stylesheet on resize().
   let ink = '#14170d';
   let ground = '#a9b77c';
-  let ghost = 'rgba(20, 23, 13, 0.13)';
+  let ghost = 'rgba(20, 23, 13, 0.07)';
   let dim = 'rgba(20, 23, 13, 0.4)';
 
   /** Recompute geometry. Call on resize and orientation change. */

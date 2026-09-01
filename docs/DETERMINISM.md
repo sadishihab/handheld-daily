@@ -98,10 +98,14 @@ scores, counters, timers measured in steps, RNG state. Use fixed-point
 
 Parachute takes this as far as it goes: an entity's position is not a
 coordinate at all but an index into a fixed set of LCD segments -- a lane and
-a stop, a dock. There is no fixed-point left to round and nothing to
+a stop, a dock, a shark's water position. Cargo is a count, and the unload
+timer is a step number. There is no fixed-point left to round and nothing to
 accumulate, and the renderer cannot draw an entity anywhere the simulation
 cannot put one. A new minigame should reach for the same shape before it
 reaches for coordinates.
+
+Difficulty ramps on an integer 0..1000 "pressure" value blended from rescues
+and elapsed steps, rather than on a float fraction, for the same reason.
 
 Floats are fine for values that are computed fresh each step rather than
 accumulated, and fine anywhere in render code.

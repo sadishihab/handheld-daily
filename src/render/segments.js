@@ -1,25 +1,14 @@
 /**
  * Seven-segment digits drawn on the LCD cell grid.
  *
- * Each digit is 3 cells wide and 5 tall. Unlit segments are drawn faintly
- * rather than omitted, which is what makes a real LCD readable as a device
- * rather than as text: you can always see the shape of the digit that is not
- * currently displayed.
+ * Segments are rectangles sized from a thickness and a length, so the digits
+ * scale with the panel rather than being locked to one cell size. Unlit
+ * segments are drawn faintly instead of omitted, which is what makes a real
+ * LCD read as a device: the shape of the digit you are not showing is always
+ * faintly there.
  */
 
-/** Cell offsets for each of the seven segments, within a 3x5 digit. */
-const SEGMENTS = {
-  a: [[0, 0], [1, 0], [2, 0]],
-  f: [[0, 1]],
-  b: [[2, 1]],
-  g: [[0, 2], [1, 2], [2, 2]],
-  e: [[0, 3]],
-  c: [[2, 3]],
-  d: [[0, 4], [1, 4], [2, 4]],
-};
-
-const ALL_SEGMENTS = 'abcdefg';
-
+/** Which of the seven segments each digit lights. */
 const DIGIT_SEGMENTS = {
   '0': 'abcdef',
   '1': 'bc',
@@ -33,64 +22,83 @@ const DIGIT_SEGMENTS = {
   '9': 'abcdfg',
 };
 
-export const DIGIT_WIDTH = 3;
-export const DIGIT_HEIGHT = 5;
-/** A digit plus the gap before the next one. */
-export const DIGIT_ADVANCE = 4;
-/** The colon is one cell wide plus a gap. */
-export const COLON_ADVANCE = 2;
+const ALL = 'abcdefg';
 
 /**
- * Draw one digit.
+ * Geometry of one digit.
+ *
+ * @param {number} unit Segment thickness, in cells.
+ * @param {number} len Segment length, in cells.
+ */
+export function digitMetrics(unit, len) {
+  return {
+    width: len + unit * 2,
+    height: len * 2 + unit * 3,
+    /** Cell advance from one glyph to the next. */
+    advance: len + unit * 3,
+    colonWidth: unit,
+    colonAdvance: unit * 3,
+  };
+}
+
+/** Rectangles for each segment, as [x, y, w, h] in cells. */
+function segmentRects(unit, len) {
+  return {
+    a: [unit, 0, len, unit],
+    f: [0, unit, unit, len],
+    b: [unit + len, unit, unit, len],
+    g: [unit, unit + len, len, unit],
+    e: [0, unit * 2 + len, unit, len],
+    c: [unit + len, unit * 2 + len, unit, len],
+    d: [unit, unit * 2 + len * 2, len, unit],
+  };
+}
+
+/**
+ * Draw a run of seven-segment glyphs. Digits and ':' are supported.
  *
  * @param {object} lcd LCD surface.
- * @param {string} char A single character; anything but 0-9 draws blank.
+ * @param {string} text
  * @param {number} col Left cell.
  * @param {number} row Top cell.
- * @param {{on: string, off: string|null}} style
- */
-export function drawDigit(lcd, char, col, row, { on, off }) {
-  const lit = DIGIT_SEGMENTS[char] || '';
-
-  for (const name of ALL_SEGMENTS) {
-    const isLit = lit.includes(name);
-    if (!isLit && !off) continue;
-    const style = isLit ? on : off;
-    for (const [dx, dy] of SEGMENTS[name]) {
-      lcd.fillArea(col + dx, row + dy, 1, 1, style);
-    }
-  }
-}
-
-/** Draw the two dots of a colon, at the same height as the digit segments. */
-export function drawColon(lcd, col, row, style) {
-  if (!style) return;
-  lcd.fillArea(col, row + 1, 1, 1, style);
-  lcd.fillArea(col, row + 3, 1, 1, style);
-}
-
-/** Total cell width of a string rendered as seven-segment digits. */
-export function measure(text) {
-  let width = 0;
-  for (const char of text) width += char === ':' ? COLON_ADVANCE : DIGIT_ADVANCE;
-  return width > 0 ? width - 1 : 0;
-}
-
-/**
- * Draw a run of digits (and colons).
- *
- * @param {{on: string, off: string|null, colonOn?: boolean}} style `off`
- *   paints the unlit segments; pass null to omit them.
+ * @param {{on: string, off: string|null, unit: number, len: number, colonOn?: boolean}} style
  */
 export function drawDigits(lcd, text, col, row, style) {
+  const { on, off, unit, len, colonOn = true } = style;
+  const metrics = digitMetrics(unit, len);
+  const rects = segmentRects(unit, len);
   let x = col;
+
   for (const char of text) {
     if (char === ':') {
-      drawColon(lcd, x, row, style.colonOn === false ? style.off : style.on);
-      x += COLON_ADVANCE;
-    } else {
-      drawDigit(lcd, char, x, row, style);
-      x += DIGIT_ADVANCE;
+      const dotStyle = colonOn ? on : off;
+      if (dotStyle) {
+        lcd.fillArea(x, row + unit + Math.floor(len / 2), unit, unit, dotStyle);
+        lcd.fillArea(x, row + unit * 2 + len + Math.floor(len / 2), unit, unit, dotStyle);
+      }
+      x += metrics.colonAdvance;
+      continue;
     }
+
+    const lit = DIGIT_SEGMENTS[char] || '';
+    for (const name of ALL) {
+      const isLit = lit.includes(name);
+      const fill = isLit ? on : off;
+      if (!fill) continue;
+      const [rx, ry, rw, rh] = rects[name];
+      lcd.fillArea(x + rx, row + ry, rw, rh, fill);
+    }
+    x += metrics.advance;
   }
+}
+
+/** Total cell width of a string rendered at this size. */
+export function measure(text, unit, len) {
+  const metrics = digitMetrics(unit, len);
+  let width = 0;
+  for (const char of text) {
+    width += char === ':' ? metrics.colonAdvance : metrics.advance;
+  }
+  // Trim the trailing gap.
+  return Math.max(0, width - (unit * 2));
 }

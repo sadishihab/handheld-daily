@@ -71,7 +71,7 @@ export function createPanel() {
      * Result screen. Also shown on load when the day is already spent, which
      * is why it takes the result rather than reading it from a live game.
      */
-    showResult({ puzzle, score, misses, streak, endReason, justPlayed, onShare, onPractice }) {
+    showResult({ puzzle, score, rescued, misses, streak, endReason, justPlayed, onShare, onPractice }) {
       reset();
       eyebrow.textContent = `PUZZLE #${puzzle}`;
       title.textContent = justPlayed
@@ -79,7 +79,8 @@ export function createPanel() {
           ? 'TIME UP'
           : 'GAME OVER'
         : 'ALREADY PLAYED';
-      addStat('RESCUED', score);
+      addStat('SCORE', score);
+      addStat('RESCUED', rescued);
       addStat('MISSED', misses);
       addStat('STREAK', streak === 1 ? '1 day' : `${streak} days`);
       addButton('SHARE', onShare, { variant: 'primary', id: 'btn-share' });
@@ -89,11 +90,12 @@ export function createPanel() {
     },
 
     /** Practice: unlimited, unranked, and labelled as such everywhere. */
-    showPracticeResult({ score, misses, endReason, onAgain, onExit }) {
+    showPracticeResult({ score, rescued, misses, endReason, onAgain, onExit }) {
       reset();
       eyebrow.textContent = 'PRACTICE';
       title.textContent = endReason === 'time' ? 'TIME UP' : 'GAME OVER';
-      addStat('RESCUED', score);
+      addStat('SCORE', score);
+      addStat('RESCUED', rescued);
       addStat('MISSED', misses);
       note.textContent = 'Practice runs do not count toward your streak.';
       note.hidden = false;

@@ -10,10 +10,13 @@ one dock. Every position the board can hold is drawn faintly at all times, the
 way an unlit LCD segment stays visible in the glass, so the player reads the
 whole board at a glance.
 
-**Parachute rescue** -- parachutists drift down toward the water and a boat
-runs along the bottom. Catch one to score, let one hit the water for a miss.
-Three misses or sixty seconds ends the run; spawn rate and fall speed climb
-throughout. Tap or hold either half of the screen to steer, or use the arrow
+**Parachute rescue** -- survivors bail out of a burning aircraft and descend
+through four lanes. The boat catches them and carries up to four, then has to
+run to the shore to unload before it can take any more. Sharks patrol the
+water and will take whoever is aboard. Only survivors delivered to shore
+score, with a bonus for landing a full boat of four. Four misses or sixty
+seconds ends the run, and the difficulty ramps with rescues rather than the
+clock alone. Tap or hold either half of the screen to steer, or use the arrow
 keys on desktop.
 
 Vanilla HTML, CSS, and ES modules -- no framework, no build step, no runtime
@@ -37,6 +40,7 @@ src/countdown.js           hh:mm:ss formatting
 src/games/parachute.js     parachute rescue -- pure simulation, no DOM
 src/render/lcd.js          LCD surface shared by every game renderer
 src/render/segments.js     seven-segment digits drawn on the cell grid
+src/render/sprites.js      sprite patterns, authored as text art
 src/render/parachute.js    draws parachute state; reads state, never mutates it
 src/ui/panel.js            start / result / practice overlay
 styles/main.css            LCD panel styling
