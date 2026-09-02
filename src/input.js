@@ -1,9 +1,30 @@
 /**
- * Input -- turns touches and keys into a {left, right} held state.
+ * Input -- turns touches and keys into a pair of orders, one per boat.
  *
- * The game never sees an event; it sees two booleans per fixed step. That
- * keeps input replayable: recording the pair each step is enough to reproduce
- * a run exactly. See docs/DETERMINISM.md.
+ * The game never sees an event; it sees `{left, right}` once per fixed step,
+ * where each is a dock index to send that boat to, or null for "no new order".
+ * That keeps input replayable: recording the pair each step is enough to
+ * reproduce a run exactly. See docs/DETERMINISM.md.
+ *
+ *
+ * WHY ORDERS AND NOT A HELD DIRECTION
+ * -----------------------------------
+ * There are two boats and, on a phone, one thumb. A held rudder needs a
+ * continuous stream of input per boat, and a thumb can only produce one
+ * stream, so a held-direction scheme forces a mode: select a boat, steer it,
+ * and leave the other one parked. Measured against a model of a hand, that
+ * scheme loses 98% of its runs and 39% of its losses are a parked boat with
+ * nothing to do.
+ *
+ * An order is discrete and it persists. The half of the panel you touch picks
+ * the boat -- so the control is addressed by where you are already looking,
+ * with no mode to get wrong -- and the column picks the dock. Lift your thumb
+ * and that boat carries on running its errand while you deal with the other
+ * side. Measured the same way, one thumb scores 0.98x of two thumbs: the
+ * control is not what limits a phone player.
+ *
+ * Holding still works and still steers: a held pointer re-issues its order
+ * every step, so sliding a thumb along the panel drags the boat with it.
  */
 
 /**
@@ -38,81 +59,111 @@ export function blockBrowserGestures() {
 }
 
 /**
- * @param {HTMLElement} target Element whose left/right halves are the pads.
+ * @param {HTMLElement} target Element the player touches -- the canvas.
+ * @param {object} options
+ * @param {(clientX: number) => {side: number, dock: number}} options.orderAt
+ *   Maps a viewport X to the boat and dock it addresses. Supplied by the
+ *   renderer, which is the only thing that knows where the board was drawn.
+ * @param {number} options.docks Docks per side, for the keyboard's range.
+ * @param {number} [options.startDock] Where each boat begins, so the keyboard
+ *   nudges from the same dock the simulation started the boat on.
  */
-export function createInput(target) {
+export function createInput(target, { orderAt, docks, startDock = docks - 1 }) {
   // Live object handed to the simulation each step. Mutated in place rather
   // than reallocated, and only ever between frames -- DOM events cannot fire
   // partway through the loop's synchronous run of fixed steps, so the value
   // is stable across every step of a given frame.
-  const state = { left: false, right: false };
+  const state = { left: null, right: null };
 
-  const keys = { left: false, right: false };
-  /** pointerId -> 'left' | 'right'. A Map so multi-touch is tracked per finger. */
+  /** pointerId -> {side, dock}. A Map so multi-touch is tracked per finger. */
   const pointers = new Map();
 
-  function halfAt(clientX) {
-    const rect = target.getBoundingClientRect();
-    return clientX < rect.left + rect.width / 2 ? 'left' : 'right';
-  }
+  /**
+   * What the keyboard last asked each boat to do.
+   *
+   * The keyboard nudges by a dock at a time, so it has to remember where it
+   * was aiming. Touch writes into this too: otherwise a tap would move the
+   * boat and the next key press would yank it back to wherever the keyboard
+   * thought it had left it.
+   */
+  const aim = [startDock, startDock];
+  /** Orders the keyboard raised this frame, cleared once handed over. */
+  const pending = [null, null];
+
+  const clamp = (dock) => (dock < 0 ? 0 : dock >= docks ? docks - 1 : dock);
 
   function recompute() {
-    let left = keys.left;
-    let right = keys.right;
-    for (const half of pointers.values()) {
-      if (half === 'left') left = true;
-      else right = true;
+    const order = [pending[0], pending[1]];
+    for (const held of pointers.values()) {
+      order[held.side] = held.dock;
+      aim[held.side] = held.dock;
     }
-    state.left = left;
-    state.right = right;
+    state.left = order[0];
+    state.right = order[1];
+    pending[0] = null;
+    pending[1] = null;
   }
 
   function onPointerDown(event) {
-    pointers.set(event.pointerId, halfAt(event.clientX));
+    pointers.set(event.pointerId, orderAt(event.clientX));
     recompute();
     event.preventDefault();
   }
 
   function onPointerMove(event) {
-    // Sliding a held finger across the midline switches direction.
+    // Sliding a held finger along the panel drags that boat with it.
     if (!pointers.has(event.pointerId)) return;
-    pointers.set(event.pointerId, halfAt(event.clientX));
+    pointers.set(event.pointerId, orderAt(event.clientX));
     recompute();
   }
 
   function onPointerUp(event) {
+    // The order stands after the thumb lifts. That is the point of the
+    // scheme: the boat keeps running the errand while you work the other side.
     if (!pointers.delete(event.pointerId)) return;
     recompute();
   }
 
-  function keyDirection(code) {
-    if (code === 'ArrowLeft' || code === 'KeyA') return 'left';
-    if (code === 'ArrowRight' || code === 'KeyD') return 'right';
-    return null;
+  /**
+   * Desktop keys. A/D work the left boat, the arrows the right one, and on
+   * each side the outward key is the one that points at that boat's own
+   * shore -- so "away from the ship" is always away from the middle of the
+   * keyboard as well as away from the middle of the screen.
+   */
+  function keyOrder(code) {
+    switch (code) {
+      case 'KeyA': return [0, clamp(aim[0] - 1)];
+      case 'KeyD': return [0, clamp(aim[0] + 1)];
+      case 'KeyW': return [0, 0];
+      case 'KeyS': return [0, docks - 1];
+      case 'ArrowRight': return [1, clamp(aim[1] - 1)];
+      case 'ArrowLeft': return [1, clamp(aim[1] + 1)];
+      case 'ArrowUp': return [1, 0];
+      case 'ArrowDown': return [1, docks - 1];
+      default: return null;
+    }
   }
 
   function onKeyDown(event) {
-    const direction = keyDirection(event.code);
-    if (!direction) return;
-    keys[direction] = true;
+    const order = keyOrder(event.code);
+    if (!order) return;
+    const [side, dock] = order;
+    aim[side] = dock;
+    pending[side] = dock;
     recompute();
     event.preventDefault();
   }
 
-  function onKeyUp(event) {
-    const direction = keyDirection(event.code);
-    if (!direction) return;
-    keys[direction] = false;
-    recompute();
-  }
-
-  /** Drop everything held -- otherwise a key released while the tab is
-   *  hidden stays stuck down and the boat drives into the wall on return. */
+  /** Drop everything held -- otherwise a finger lifted while the tab is
+   *  hidden stays in the map and keeps re-issuing an order on return. */
   function releaseAll() {
-    keys.left = false;
-    keys.right = false;
     pointers.clear();
-    recompute();
+    pending[0] = null;
+    pending[1] = null;
+    aim[0] = startDock;
+    aim[1] = startDock;
+    state.left = null;
+    state.right = null;
   }
 
   target.addEventListener('pointerdown', onPointerDown);
@@ -120,15 +171,29 @@ export function createInput(target) {
   target.addEventListener('pointerup', onPointerUp);
   target.addEventListener('pointercancel', onPointerUp);
   window.addEventListener('keydown', onKeyDown);
-  window.addEventListener('keyup', onKeyUp);
   window.addEventListener('blur', releaseAll);
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) releaseAll();
   });
 
   return {
-    /** Live held state. Read each fixed step. */
+    /** Live order pair. Read each fixed step. */
     state,
+    /**
+     * Hand the current orders to one step and clear the one-shot ones.
+     *
+     * A key press is an event, not a held state: it must reach exactly one
+     * step, or holding a key would order the boat once per frame at whatever
+     * rate the display happens to run -- which is a frame-rate dependency in
+     * the input path, and the one place the fixed timestep cannot protect
+     * the simulation from it.
+     */
+    consume() {
+      const order = { left: state.left, right: state.right };
+      // A held pointer keeps issuing; a key press does not.
+      recompute();
+      return order;
+    },
     /** Immutable copy, for recording or replaying a run. */
     snapshot() {
       return { left: state.left, right: state.right };

@@ -167,7 +167,7 @@ console.log('daily ritual\n');
   const text = formatShareText({ puzzle: 1, rescued: 47, streak: 6, steps: 2520, totalSteps: 3600 });
   const lines = text.split('\n');
   check('share text is three lines', lines.length === 3, JSON.stringify(text));
-  check('line 1 names the puzzle', lines[0] === 'HANDHELD DAILY #1  \u{1FA82}', JSON.stringify(lines[0]));
+  check('line 1 names the puzzle', lines[0] === 'HANDHELD DAILY #1  \u{1F6A2}', JSON.stringify(lines[0]));
   check('line 2 carries score and bar', lines[1] === '47 rescued  ▓▓▓▓▓▓▓░░░', JSON.stringify(lines[1]));
   check('line 3 carries the streak', lines[2] === '\u{1F525} 6 day streak', JSON.stringify(lines[2]));
   check('share text contains no URL', !/https?:|www\.|\.com/i.test(text));

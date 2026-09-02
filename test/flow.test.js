@@ -72,7 +72,7 @@ await new Promise((r) => setTimeout(r, 10));
 ok('share copies to the clipboard', dom.clipboard.written.length === 1, JSON.stringify(dom.clipboard.written));
 const shared = dom.clipboard.written[0] || '';
 ok('share text has the expected shape',
-   /^HANDHELD DAILY #\d+ {2}\u{1FA82}\n\d+ rescued {2}[▓░]{10}$/u.test(shared),
+   /^HANDHELD DAILY #\d+ {2}\u{1F6A2}\n\d+ rescued {2}[▓░]{10}$/u.test(shared),
    JSON.stringify(shared));
 ok('share text carries no URL', !/https?:|www\./i.test(shared));
 

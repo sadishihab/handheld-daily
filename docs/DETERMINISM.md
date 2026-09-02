@@ -97,12 +97,21 @@ Keep anything that must match exactly in integers: positions on a grid,
 scores, counters, timers measured in steps, RNG state. Use fixed-point
 (store hundredths as an integer) before reaching for a float accumulator.
 
-Parachute takes this as far as it goes: an entity's position is not a
-coordinate at all but an index into a fixed set of LCD segments -- a lane and
-a stop, a dock, a shark's water position. Cargo is a count. There is no
-fixed-point left to round and nothing to accumulate, and the renderer cannot
-draw an entity anywhere the simulation cannot put one. A new minigame should reach for the same shape before it
+Ship rescue takes this as far as it goes: an entity's position is not a
+coordinate at all but an index into a fixed set of LCD segments -- a side, a
+lane and a stop for someone in the air; a side and a dock for a boat or a
+shark; a numbered place on a deck for someone waiting to jump. Cargo is a
+count and so is the crowd. There is no fixed-point left to round and nothing
+to accumulate, and the renderer cannot draw an entity anywhere the simulation
+cannot put one. A new minigame should reach for the same shape before it
 reaches for coordinates.
+
+Input is held to the same rule. The simulation is not handed a held direction
+but an *order* per boat -- a dock index, or null for "no new order this step"
+-- so the thing crossing from the input layer into the run is a small integer,
+and a recorded run is a list of integer pairs. Turning a touch position into a
+dock index happens in `src/render/`, outside the simulation, where a float
+coordinate is allowed to exist.
 
 Difficulty ramps on an integer 0..1000 "pressure" value blended from rescues
 and elapsed steps, rather than on a float fraction, for the same reason.
@@ -143,9 +152,10 @@ seed and asserts the output is byte-identical across repeat runs, across
 60/120/30Hz frame pacing, and across deliberately jittery frame times. It also
 asserts different seeds diverge, that daily seeds depend on the UTC day and
 nothing else, and that the backgrounded-tab clamp holds. It then plays full
-parachute runs from a fixed seed and a recorded input script and asserts the
-same seed plus the same inputs gives the same score, the same trace and the
-same ending.
+rescue runs from a fixed seed and a recorded order script and asserts the
+same seed plus the same orders gives the same score, the same trace and the
+same ending -- including that an order to one boat never disturbs the other,
+and that a boat with no new order keeps running the last one it was given.
 
 Add a case to it whenever you add a system that could drift.
 
@@ -162,19 +172,19 @@ values -- a digest of the whole trace, plus the closing summary for legibility:
 
 ```js
 const GOLDEN = {
-  seed: 12345, scriptSeed: 31, score: 60, rescued: 4, misses: 4,
-  step: 1178, endReason: 'misses', trace: 'eabb8c8608dd0241',
+  seed: 12345, scriptSeed: 10, score: 60, rescued: 6, misses: 4,
+  step: 1293, endReason: 'misses', trace: '4c6d4fb36d04047a',
 };
 ```
 
 The digest is the assertion; the summary is there so a failure says something
 human before it says a hash mismatched. Pinning the summary alone is not
-enough, and this is not hypothetical: shortening the unload and widening the
-run to the shore moved the boat onto docks that had not existed before, from
-step 22 of this very seed, and the run still ended on the same score, rescues,
-misses and step. The summary-only fingerprint reported "unchanged" through a
-change that altered every player's puzzle. A fingerprint trusted that far has
-to pin the whole run.
+enough, and this is not hypothetical. In the game this one replaced,
+shortening the unload and widening the run to the shore moved the boat onto
+docks that had not existed before, from step 22 of the pinned seed, and the
+run still ended on the same score, rescues, misses and step. The summary-only
+fingerprint reported "unchanged" through a change that altered every player's
+puzzle. A fingerprint trusted that far has to pin the whole run.
 
 Before launch, a failure here just means updating the values. After launch it
 means today's puzzle no longer matches the one players already played and

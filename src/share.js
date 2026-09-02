@@ -5,7 +5,7 @@
  * separate because it needs a browser and a user gesture.
  */
 
-import { RUN_STEPS } from './games/parachute.js';
+import { RUN_STEPS } from './games/rescue.js';
 import { displayPuzzleNumber } from './daily.js';
 
 const BAR_LENGTH = 10;
@@ -19,7 +19,7 @@ const BAR_EMPTY = '░'; // ░
  * characters WhatsApp treats as formatting (* _ ~ `). Lines are joined with
  * plain \n, which is what both WhatsApp and Messenger paste cleanly.
  *
- * The headline number is survivors delivered, not points: "rescued" has to
+ * The headline number is passengers put ashore, not points: "rescued" has to
  * mean people. Points, which include the full-boat bonus, stay on the result
  * screen. The bar shows how far into the sixty seconds the run got, which is
  * the part neither number conveys.
@@ -31,7 +31,7 @@ export function formatShareText({ puzzle, rescued, streak, steps, totalSteps = R
   const bar = BAR_FILLED.repeat(filled) + BAR_EMPTY.repeat(BAR_LENGTH - filled);
 
   const lines = [
-    `HANDHELD DAILY #${displayPuzzleNumber(puzzle)}  \u{1FA82}`,
+    `HANDHELD DAILY #${displayPuzzleNumber(puzzle)}  \u{1F6A2}`,
     `${rescued} rescued  ${bar}`,
   ];
 

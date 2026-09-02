@@ -9,3 +9,7 @@ package-lock.json
 wrangler.jsonc
 .gitignore
 .assetsignore
+
+# Dev-only pages. Served locally over the LAN for testing on a phone; never
+# part of a deploy.
+grid-test.html

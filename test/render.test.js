@@ -8,22 +8,27 @@
  * simulation is correct whether or not two segments occupy the same cell.
  */
 
-import { createParachuteRenderer, GRID_WIDTH, GRID_HEIGHT, LAYOUT } from '../src/render/parachute.js';
+import { createRescueRenderer, GRID_WIDTH, GRID_HEIGHT, LAYOUT } from '../src/render/rescue.js';
 import {
-  createParachuteGame,
-  LANES,
-  STOPS,
-  SHORE_DOCK,
+  createRescueGame,
+  SIDES,
+  DOCKS_PER_SIDE,
+  LANES_PER_SIDE,
+  ARC_STOPS,
+  CROWD_PER_SIDE,
   CAPACITY,
   RUN_STEPS,
-} from '../src/games/parachute.js';
+  SHARK_DOCKS,
+  SPLASH_FRAME_STEPS,
+} from '../src/games/rescue.js';
 import {
   patternSize,
-  PARACHUTIST,
-  SURVIVOR,
+  flip,
+  PASSENGER,
+  DECK_PASSENGER,
   HULL,
   SHARK,
-  SPLASH,
+  SPLASH_FRAMES,
 } from '../src/render/sprites.js';
 
 const INK = '#14170d';
@@ -56,13 +61,17 @@ function createHarness() {
   const canvas = {
     width: 0, height: 0,
     getContext: () => ctx,
-    getBoundingClientRect: () => ({ left: 0, top: 0, width: GRID_WIDTH * SCALE, height: GRID_HEIGHT * SCALE }),
+    getBoundingClientRect: () => ({
+      left: 0, top: 0, width: GRID_WIDTH * SCALE, height: GRID_HEIGHT * SCALE,
+    }),
   };
   global.window = { devicePixelRatio: 1 };
   global.getComputedStyle = () => ({
-    getPropertyValue: (n) => ({ '--lcd-on': INK, '--lcd-bg': GROUND, '--lcd-ghost': GHOST, '--lcd-dim': DIM })[n] ?? '',
+    getPropertyValue: (n) => ({
+      '--lcd-on': INK, '--lcd-bg': GROUND, '--lcd-ghost': GHOST, '--lcd-dim': DIM,
+    })[n] ?? '',
   });
-  const renderer = createParachuteRenderer(canvas);
+  const renderer = createRescueRenderer(canvas);
   renderer.resize();
   return {
     renderer, canvas,
@@ -97,40 +106,69 @@ function patternCells(pattern, col, row) {
   return out;
 }
 
-const half = (n) => Math.floor(n / 2);
-const W = {
-  para: patternSize(PARACHUTIST).width,
-  hull: patternSize(HULL).width,
-  shark: patternSize(SHARK).width,
-  splash: patternSize(SPLASH).width,
-};
+/* -- every cell each kind of entity can ever light ---------------------- */
 
-const parachutistCells = (lane, stop) =>
-  patternCells(PARACHUTIST, LAYOUT.LANE_COL[lane] - half(W.para), LAYOUT.STOP_ROW[stop]);
-const splashCells = (lane) =>
-  patternCells(SPLASH, LAYOUT.LANE_COL[lane] - half(W.splash), LAYOUT.SPLASH_ROW);
-const sharkCells = (lane) =>
-  patternCells(SHARK, LAYOUT.LANE_COL[lane] - half(W.shark), LAYOUT.SHARK_ROW);
-function boatCells(dock) {
-  const left = LAYOUT.DOCK_COL[dock] - half(W.hull);
+const crowdCells = (side, slot) => {
+  const { col, row } = LAYOUT.crowdSlot(side, slot);
+  return patternCells(DECK_PASSENGER, col, row);
+};
+const jumperCells = (side, lane, stop) =>
+  patternCells(LAYOUT.jumperPose(stop), LAYOUT.jumperCol(side, lane, stop), LAYOUT.STOP_ROW[stop]);
+const splashCells = (side, lane, frame) =>
+  patternCells(SPLASH_FRAMES[frame], LAYOUT.splashCol(side, lane), LAYOUT.SPLASH_ROW);
+const sharkCells = (side, dock, facingLeft) =>
+  patternCells(facingLeft ? SHARK : flip(SHARK), LAYOUT.sharkCol(side, dock), LAYOUT.SHARK_ROW);
+
+function boatCells(side, dock, slots = CAPACITY) {
+  const left = LAYOUT.hullCol(side, dock);
   const cells = patternCells(HULL, left, LAYOUT.HULL_ROW);
-  for (let slot = 0; slot < CAPACITY; slot++) {
+  for (let slot = 0; slot < slots; slot++) {
     cells.push(
-      ...patternCells(SURVIVOR, left + LAYOUT.SLOT_INSET + slot * LAYOUT.SLOT_PITCH, LAYOUT.SLOT_ROW)
+      ...patternCells(PASSENGER, left + LAYOUT.SLOT_INSET + slot * LAYOUT.SLOT_PITCH, LAYOUT.SLOT_ROW)
     );
   }
   return cells;
 }
 
-// The slots have to stay clear of each other, or a full boat reads as one
-// smear rather than four survivors. This is the constraint that decides how
-// narrow the hull may get, so it is asserted rather than left to the eye.
-{
-  const gap = LAYOUT.SLOT_PITCH - patternSize(SURVIVOR).width;
-  const rightmost = LAYOUT.SLOT_INSET + (CAPACITY - 1) * LAYOUT.SLOT_PITCH + patternSize(SURVIVOR).width;
-  check('survivor slots leave a clear column between them', gap >= 1, `gap ${gap}`);
-  check('every survivor slot sits on the hull',
-    LAYOUT.SLOT_INSET >= 0 && rightmost <= W.hull, `slots span 0..${rightmost} of ${W.hull}`);
+/** Every cell any entity could ever occupy, anywhere on the board. */
+function allEntityCells() {
+  const cells = new Set();
+  const add = (list) => list.forEach((c) => cells.add(c));
+  for (let side = 0; side < SIDES; side++) {
+    for (let slot = 0; slot < CROWD_PER_SIDE; slot++) add(crowdCells(side, slot));
+    for (let lane = 0; lane < LANES_PER_SIDE; lane++) {
+      for (let stop = 0; stop < ARC_STOPS; stop++) add(jumperCells(side, lane, stop));
+      for (let frame = 0; frame < SPLASH_FRAMES.length; frame++) add(splashCells(side, lane, frame));
+    }
+    for (const dock of SHARK_DOCKS) {
+      add(sharkCells(side, dock, true));
+      add(sharkCells(side, dock, false));
+    }
+    for (let dock = 0; dock < DOCKS_PER_SIDE; dock++) add(boatCells(side, dock));
+  }
+  return cells;
+}
+
+/** The cells the entities actually present in `state` are lighting. */
+function litCells(state) {
+  const cells = new Set();
+  const add = (list) => list.forEach((c) => cells.add(c));
+  for (let side = 0; side < SIDES; side++) {
+    const boat = state.boats[side];
+    add(boatCells(side, boat.dock));
+    for (let slot = CROWD_PER_SIDE - boat.waiting; slot < CROWD_PER_SIDE; slot++) {
+      add(crowdCells(side, slot));
+    }
+  }
+  for (const j of state.jumpers) if (j.stop < ARC_STOPS) add(jumperCells(j.side, j.lane, j.stop));
+  for (const s of state.sharks) {
+    add(sharkCells(s.side, s.pos, true));
+    add(sharkCells(s.side, s.pos, false));
+  }
+  for (const s of state.splashes) {
+    for (let f = 0; f < SPLASH_FRAMES.length; f++) add(splashCells(s.side, s.lane, f));
+  }
+  return cells;
 }
 
 console.log('renderer\n');
@@ -141,102 +179,253 @@ check('the backing store matches the grid',
   harness.canvas.width === GRID_WIDTH * SCALE && harness.canvas.height === GRID_HEIGHT * SCALE,
   `${harness.canvas.width}x${harness.canvas.height}`);
 
-// --- everything snaps to the cell grid
+/* -- the readability the finer grid was bought for ---------------------- */
+//
+// This is the constraint that decided GRID_WIDTH, so it is asserted rather
+// than left to the eye. Four passengers in a hull have to read as four
+// people; at the old grid they shared edges and read as one bar.
 {
-  const game = createParachuteGame({ seed: 12345 });
-  for (let i = 0; i < 600; i++) game.update({ left: false, right: true });
+  const passW = patternSize(PASSENGER).width;
+  const hullW = patternSize(HULL).width;
+  const gap = LAYOUT.SLOT_PITCH - passW;
+  const rightmost = LAYOUT.SLOT_INSET + (CAPACITY - 1) * LAYOUT.SLOT_PITCH + passW;
+  check('a passenger is at least three cells wide', passW >= 3, `${passW} cells`);
+  check('passenger slots leave a clear column between them', gap >= 1, `gap ${gap}`);
+  check('every passenger slot sits on the hull',
+    LAYOUT.SLOT_INSET >= 0 && rightmost <= hullW, `slots span 0..${rightmost} of ${hullW}`);
+
+  // And the docks have to stay apart, or the ghost row is one long bar
+  // rather than a line of moorings.
+  const pitch = LAYOUT.DOCK_CENTRE[0][1] - LAYOUT.DOCK_CENTRE[0][0];
+  check('neighbouring docks are separated by clear water', pitch - hullW >= 3,
+    `${pitch - hullW} clear cells between hulls`);
+
+  // The two innermost hulls, one per side, must not run into each other.
+  const innerLeft = LAYOUT.hullCol(0, DOCKS_PER_SIDE - 1) + hullW - 1;
+  const innerRight = LAYOUT.hullCol(1, DOCKS_PER_SIDE - 1);
+  check('the two innermost docks do not overlap at the centre line',
+    innerLeft < innerRight, `left ends at ${innerLeft}, right starts at ${innerRight}`);
+
+  // The same rule the hull lives under applies to anything else that stands
+  // on a dock. A shark wider than the pitch made the ghost row read as one
+  // continuous bar rather than as separate fish -- and because the ghost
+  // board draws both facings at every dock, it was twice as bad as it looked.
+  const sharkW = patternSize(SHARK).width;
+  check('nothing that stands on a dock is wider than the boat',
+    sharkW <= hullW, `shark ${sharkW}, hull ${hullW}`);
+
+  const merged = [];
+  for (let side = 0; side < SIDES; side++) {
+    for (let i = 1; i < SHARK_DOCKS.length; i++) {
+      const near = new Set([
+        ...sharkCells(side, SHARK_DOCKS[i - 1], true),
+        ...sharkCells(side, SHARK_DOCKS[i - 1], false),
+      ]);
+      const far = [
+        ...sharkCells(side, SHARK_DOCKS[i], true),
+        ...sharkCells(side, SHARK_DOCKS[i], false),
+      ];
+      if (far.some((cell) => near.has(cell))) merged.push(`${side}:${SHARK_DOCKS[i - 1]}-${SHARK_DOCKS[i]}`);
+    }
+  }
+  check('neighbouring shark positions stay separate fish', merged.length === 0, merged.join(', '));
+}
+
+/* -- the board is symmetrical about the ship ---------------------------- */
+{
+  const mismatches = [];
+  for (let dock = 0; dock < DOCKS_PER_SIDE; dock++) {
+    const mirrored = LAYOUT.mirrorCentre(LAYOUT.DOCK_CENTRE[0][dock]);
+    if (mirrored !== LAYOUT.DOCK_CENTRE[1][dock]) mismatches.push(`dock ${dock}`);
+  }
+  for (let slot = 0; slot < CROWD_PER_SIDE; slot++) {
+    const left = LAYOUT.crowdSlot(0, slot);
+    const right = LAYOUT.crowdSlot(1, slot);
+    const width = patternSize(DECK_PASSENGER).width;
+    if (LAYOUT.mirrorCol(left.col, width) !== right.col || left.row !== right.row) {
+      mismatches.push(`crowd ${slot}`);
+    }
+  }
+  check('the right-hand half is the left-hand half reflected',
+    mismatches.length === 0, mismatches.slice(0, 4).join(', '));
+}
+
+/* -- everything snaps to the cell grid ---------------------------------- */
+{
+  const game = createRescueGame({ seed: 12345 });
+  for (let i = 0; i < 900; i++) game.update({ left: 0, right: 5 });
   const { rects } = harness.draw(game.state, {});
   const fractional = rects.filter((r) => ![r.x, r.y, r.w, r.h].every(Number.isInteger));
-  check('every drawn rectangle lands on whole pixels', fractional.length === 0, JSON.stringify(fractional.slice(0, 3)));
-  const offGrid = rects.filter((r) => (r.x % SCALE || r.y % SCALE || r.w % SCALE || r.h % SCALE) && !(r.x === 0 && r.y === 0));
+  check('every drawn rectangle lands on whole pixels', fractional.length === 0,
+    JSON.stringify(fractional.slice(0, 3)));
+  const offGrid = rects.filter(
+    (r) => (r.x % SCALE || r.y % SCALE || r.w % SCALE || r.h % SCALE) && !(r.x === 0 && r.y === 0)
+  );
   check('every segment snaps to a whole cell', offGrid.length === 0, JSON.stringify(offGrid.slice(0, 3)));
 }
 
-// --- the ghost board: every position visible at all times
+/* -- the ghost board: every position visible at all times ---------------- */
 {
-  const game = createParachuteGame({ seed: 12345 });
+  const game = createRescueGame({ seed: 12345 });
   const { rects } = harness.draw(game.state, {});
   const ghost = cellsOf(rects, GHOST);
-  const lit = new Set(boatCells(game.state.boatDock));
-
+  const lit = litCells(game.state);
   const missing = [];
-  for (let lane = 0; lane < LANES; lane++) {
-    for (let stop = 0; stop < STOPS; stop++) {
-      for (const cell of parachutistCells(lane, stop)) if (!ghost.has(cell)) missing.push(`para ${lane}/${stop} ${cell}`);
+  const want = (label, cells) => {
+    for (const cell of cells) if (!ghost.has(cell) && !lit.has(cell)) missing.push(`${label} ${cell}`);
+  };
+
+  for (let side = 0; side < SIDES; side++) {
+    for (let lane = 0; lane < LANES_PER_SIDE; lane++) {
+      for (let stop = 0; stop < ARC_STOPS; stop++) want(`jumper ${side}/${lane}/${stop}`, jumperCells(side, lane, stop));
+      for (let f = 0; f < SPLASH_FRAMES.length; f++) want(`splash ${side}/${lane}/${f}`, splashCells(side, lane, f));
     }
-    for (const cell of splashCells(lane)) if (!ghost.has(cell)) missing.push(`splash ${lane} ${cell}`);
-    for (const cell of sharkCells(lane)) if (!ghost.has(cell)) missing.push(`shark ${lane} ${cell}`);
+    for (const dock of SHARK_DOCKS) {
+      want(`shark ${side}/${dock}/L`, sharkCells(side, dock, true));
+      want(`shark ${side}/${dock}/R`, sharkCells(side, dock, false));
+    }
+    for (let dock = 0; dock < DOCKS_PER_SIDE; dock++) want(`dock ${side}/${dock}`, boatCells(side, dock));
   }
-  check(`all ${LANES * STOPS} parachutist, ${LANES} splash and ${LANES} shark positions are ghosted`,
-    missing.length === 0, `${missing.length} missing, e.g. ${missing.slice(0, 3).join(', ')}`);
-
-  const dockMissing = [];
-  for (let dock = 0; dock <= SHORE_DOCK; dock++) {
-    if (dock === game.state.boatDock) continue;
-    for (const cell of boatCells(dock)) if (!ghost.has(cell) && !lit.has(cell)) dockMissing.push(`dock ${dock} ${cell}`);
-  }
-  check(`all ${SHORE_DOCK + 1} dock positions are ghosted, including the shore`,
-    dockMissing.length === 0, `${dockMissing.length} missing, e.g. ${dockMissing.slice(0, 3).join(', ')}`);
-
-  // Ghosting every dock is only useful if the player can tell them apart.
-  // With SHORE_GAP widened the docks crowd together, and at some point the
-  // row stops reading as moorings and becomes one continuous bar.
-  const pitch = LAYOUT.DOCK_COL[1] - LAYOUT.DOCK_COL[0];
-  check('neighbouring docks do not overlap', pitch > W.hull, `pitch ${pitch}, hull ${W.hull}`);
-  check('neighbouring docks are separated by clear water', pitch - W.hull >= 3,
-    `${pitch - W.hull} clear cells between hulls`);
+  check(
+    `all ${SIDES * LANES_PER_SIDE * ARC_STOPS} jumper, ` +
+      `${SIDES * LANES_PER_SIDE * SPLASH_FRAMES.length} splash, ` +
+      `${SIDES * SHARK_DOCKS.length * 2} shark and ${SIDES * DOCKS_PER_SIDE} dock positions are ghosted`,
+    missing.length === 0,
+    `${missing.length} missing, e.g. ${missing.slice(0, 3).join(', ')}`
+  );
 }
 
-// --- lit entities land exactly on their segments
+/* -- the crowd: ghosted when empty, lit when waiting, extinguishing as
+      passengers jump. The deck is the densest thing on the panel and the
+      whole reason it reads as populated, so all three states are asserted. */
 {
-  const game = createParachuteGame({ seed: 12345 });
-  for (let i = 0; i < 2000 && game.state.aboard === 0; i++) {
-    const t = game.state.parachutists.find((p) => !p.doomed);
-    game.update(t ? { left: t.lane < game.state.boatDock, right: t.lane > game.state.boatDock } : {});
+  const empty = createRescueGame({ seed: 7 });
+  for (const boat of empty.state.boats) boat.waiting = 0;
+  const ghosted = cellsOf(harness.draw(empty.state, {}).rects, GHOST);
+
+  const unghosted = [];
+  for (let side = 0; side < SIDES; side++) {
+    for (let slot = 0; slot < CROWD_PER_SIDE; slot++) {
+      for (const cell of crowdCells(side, slot)) if (!ghosted.has(cell)) unghosted.push(`${side}/${slot}`);
+    }
+  }
+  check(`all ${SIDES * CROWD_PER_SIDE} deck positions stay ghosted once empty`,
+    unghosted.length === 0, `${unghosted.length} cells, e.g. ${unghosted.slice(0, 3).join(', ')}`);
+
+  const full = createRescueGame({ seed: 7 });
+  const fullInk = cellsOf(harness.draw(full.state, {}).rects, INK);
+  const unlit = [];
+  for (let side = 0; side < SIDES; side++) {
+    for (let slot = 0; slot < CROWD_PER_SIDE; slot++) {
+      for (const cell of crowdCells(side, slot)) if (!fullInk.has(cell)) unlit.push(`${side}/${slot}`);
+    }
+  }
+  check('a full deck lights every one of them', unlit.length === 0,
+    `${unlit.length} cells, e.g. ${unlit.slice(0, 3).join(', ')}`);
+
+  // Extinguishing: each passenger who jumps puts out exactly one figure, and
+  // it is the innermost one still standing -- the crowd thins from the fire
+  // outward, which is the direction jumpers come from.
+  const counts = [];
+  let orderHolds = true;
+  for (const gone of [0, 1, 2, 10, CROWD_PER_SIDE]) {
+    const s = createRescueGame({ seed: 7 });
+    for (const boat of s.state.boats) boat.waiting = CROWD_PER_SIDE - gone;
+    const ink = cellsOf(harness.draw(s.state, {}).rects, INK);
+    let litSlots = 0;
+    for (let slot = 0; slot < CROWD_PER_SIDE; slot++) {
+      const isLit = crowdCells(0, slot).every((c) => ink.has(c));
+      if (isLit) litSlots += 1;
+      // Slots below `gone` have jumped; every slot at or above it is still there.
+      if (isLit !== slot >= gone) orderHolds = false;
+    }
+    counts.push(litSlots);
+  }
+  check('the crowd extinguishes one figure per passenger who jumps',
+    counts.join(',') === [CROWD_PER_SIDE, CROWD_PER_SIDE - 1, CROWD_PER_SIDE - 2, CROWD_PER_SIDE - 10, 0].join(','),
+    `lit counts ${counts.join(', ')}`);
+  check('it extinguishes from the middle of the ship outward', orderHolds);
+}
+
+/* -- lit entities land exactly on their segments ------------------------ */
+{
+  const game = createRescueGame({ seed: 12345 });
+  // Chase whatever is falling, on both sides, until someone is aboard.
+  for (let i = 0; i < 3000 && game.state.boats.every((b) => b.aboard === 0); i++) {
+    const order = { left: null, right: null };
+    for (const j of game.state.jumpers) {
+      order[j.side === 0 ? 'left' : 'right'] = [3, 4, 5][j.lane];
+    }
+    game.update(order);
   }
   const { rects } = harness.draw(game.state, {});
   const ink = cellsOf(rects, INK);
 
-  const left = LAYOUT.DOCK_COL[game.state.boatDock] - half(W.hull);
-  const hull = patternCells(HULL, left, LAYOUT.HULL_ROW);
-  check('the hull is lit at its dock', hull.every((c) => ink.has(c)));
-  check('survivors aboard are lit in their slots', game.state.aboard > 0, `aboard ${game.state.aboard}`);
+  const side = game.state.boats[0].aboard > 0 ? 0 : 1;
+  const boat = game.state.boats[side];
+  check('a boat is carrying someone', boat.aboard > 0, `aboard ${game.state.boats.map((b) => b.aboard)}`);
+
+  const left = LAYOUT.hullCol(side, boat.dock);
+  check('the hull is lit at its dock',
+    patternCells(HULL, left, LAYOUT.HULL_ROW).every((c) => ink.has(c)));
 
   const slotCol = (slot) => left + LAYOUT.SLOT_INSET + slot * LAYOUT.SLOT_PITCH;
-  const filled = patternCells(SURVIVOR, slotCol(0), LAYOUT.SLOT_ROW);
-  check('the first survivor slot is lit when carrying', filled.every((c) => ink.has(c)));
-  const emptySlot = patternCells(SURVIVOR, slotCol(CAPACITY - 1), LAYOUT.SLOT_ROW);
+  check('a passenger aboard is lit in the first slot',
+    patternCells(PASSENGER, slotCol(0), LAYOUT.SLOT_ROW).every((c) => ink.has(c)));
   check('an unused slot stays ghosted',
-    game.state.aboard === CAPACITY || !emptySlot.every((c) => ink.has(c)));
+    boat.aboard === CAPACITY ||
+      !patternCells(PASSENGER, slotCol(CAPACITY - 1), LAYOUT.SLOT_ROW).every((c) => ink.has(c)));
 
-  let placed = true;
-  for (const p of game.state.parachutists) {
-    const expected = p.doomed && p.stop >= STOPS - 1 ? splashCells(p.lane) : parachutistCells(p.lane, p.stop);
-    if (!expected.every((c) => ink.has(c))) placed = false;
-  }
-  check('every parachutist is lit at its (lane, stop)', placed);
+  check('every jumper is lit at its (side, lane, stop)',
+    game.state.jumpers.every((j) => jumperCells(j.side, j.lane, j.stop).every((c) => ink.has(c))));
 }
 
-// --- painted art must never sit on a segment an entity can use
+/* -- the flail and splash actually advances through its frames ---------- */
 {
-  const entityCells = new Set();
-  for (let lane = 0; lane < LANES; lane++) {
-    for (let stop = 0; stop < STOPS; stop++) parachutistCells(lane, stop).forEach((c) => entityCells.add(c));
-    splashCells(lane).forEach((c) => entityCells.add(c));
-    sharkCells(lane).forEach((c) => entityCells.add(c));
+  const game = createRescueGame({ seed: 3 });
+  const seen = new Set();
+  for (let frame = 0; frame < SPLASH_FRAMES.length; frame++) {
+    const s = createRescueGame({ seed: 3 });
+    s.state.splashes = [{ side: 0, lane: 1, age: frame * SPLASH_FRAME_STEPS }];
+    const ink = cellsOf(harness.draw(s.state, {}).rects, INK);
+    const shown = SPLASH_FRAMES.findIndex((_, i) =>
+      splashCells(0, 1, i).every((c) => ink.has(c)) &&
+      splashCells(0, 1, i).length > 0);
+    seen.add(shown);
   }
-  for (let dock = 0; dock <= SHORE_DOCK; dock++) boatCells(dock).forEach((c) => entityCells.add(c));
+  check(`the splash steps through all ${SPLASH_FRAMES.length} frames as it ages`,
+    seen.size === SPLASH_FRAMES.length && !seen.has(-1),
+    `frames shown: ${[...seen].join(', ')}`);
 
-  // Sweep water phases AND every dock, since the lit boat moves.
+  // A miss has to be visible as an event, not just as a lamp lighting.
+  const quiet = cellsOf(harness.draw(game.state, {}).rects, INK).size;
+  const splashing = createRescueGame({ seed: 3 });
+  splashing.state.splashes = [{ side: 0, lane: 1, age: 2 * SPLASH_FRAME_STEPS }];
+  const loud = cellsOf(harness.draw(splashing.state, {}).rects, INK).size;
+  check('a splash lights cells that nothing else was lighting', loud > quiet, `${quiet} -> ${loud}`);
+}
+
+/* -- painted art must never sit on a segment an entity can use ----------- */
+//
+// The strongest layout assertion in the suite. Every deck plank, funnel,
+// jetty, wave and flame is swept against every cell any entity could ever
+// stand on. A passenger drawn on the same cells as the deck under them is
+// invisible, and no other test can see it.
+{
+  const entityCells = allEntityCells();
   const collisions = new Set();
-  for (const step of [0, 24, 48, 72]) {
-    for (let dock = 0; dock <= SHORE_DOCK; dock++) {
-      const game = createParachuteGame({ seed: 3 });
+
+  // Sweep the water phase, the flame frame, and every dock the boats can be
+  // at -- all three change which cells the painted layers touch.
+  for (const step of [0, 9, 18, 24, 48, 72]) {
+    for (let dock = 0; dock < DOCKS_PER_SIDE; dock++) {
+      const game = createRescueGame({ seed: 3 });
       game.state.step = step;
-      game.state.boatDock = dock;
+      game.state.boats[0].dock = dock;
+      game.state.boats[1].dock = DOCKS_PER_SIDE - 1 - dock;
       const { rects } = harness.draw(game.state, {});
       const painted = cellsOf(rects, INK, DIM);
-      const lit = new Set(boatCells(dock));
+      const lit = litCells(game.state);
       for (const cell of painted) {
         if (entityCells.has(cell) && !lit.has(cell)) collisions.add(`${cell} dock${dock}@${step}`);
       }
@@ -246,93 +435,130 @@ check('the backing store matches the grid',
     collisions.size === 0, `${collisions.size} cells, e.g. ${[...collisions].slice(0, 6).join(', ')}`);
 }
 
-// --- the readout, now that the wall clock is gone
-//
-// The clock was dropped and the score took the top-left corner it held, with
-// the miss lamps opposite. These assert the band actually reads that way --
-// a renderer that quietly drew nothing there would still pass every layout
-// check above, since the readout occupies no cell an entity can use.
+/* -- the readout band --------------------------------------------------- */
 {
-  const game = createParachuteGame({ seed: 1 });
+  const game = createRescueGame({ seed: 1 });
   const plain = harness.draw(game.state, {});
-
   check('the readout draws as segments, not text', plain.texts.length === 0);
 
-  // The clock was the only caller-supplied string the panel ever drew, and
-  // the only reason segments.js knew how to render a ':'. Nothing may bring
-  // it back by accident.
-  const withClock = harness.draw(game.state, { clock: '18:45', colonOn: true });
-  check('a leftover clock in the view draws nothing',
-    JSON.stringify(withClock.rects) === JSON.stringify(plain.rects));
-
   /** Lit cells inside a row band, optionally restricted to one half. */
-  function bandCells(state, top, bottom, half = null) {
+  function bandCells(state, top, bottom, side = null) {
     const cells = cellsOf(harness.draw(state, {}).rects, INK);
     const out = [];
     for (const cell of cells) {
       const [col, row] = cell.split(',').map(Number);
       if (row < top || row > bottom) continue;
-      if (half === 'left' && col >= GRID_WIDTH / 2) continue;
-      if (half === 'right' && col < GRID_WIDTH / 2) continue;
+      if (side === 'left' && col >= GRID_WIDTH / 2) continue;
+      if (side === 'right' && col < GRID_WIDTH / 2) continue;
       out.push([col, row]);
     }
     return out;
   }
 
-  const scored = createParachuteGame({ seed: 1 });
-  scored.state.score = 888;
-  const dim = createParachuteGame({ seed: 1 });
+  const scored = createRescueGame({ seed: 1 });
+  scored.state.score = 8888;
+  const dim = createRescueGame({ seed: 1 });
   dim.state.score = 0;
 
-  const bright = bandCells(scored.state, 0, 25, 'left');
-  const faint = bandCells(dim.state, 0, 25, 'left');
+  const bright = bandCells(scored.state, 0, 40, 'left');
+  const faint = bandCells(dim.state, 0, 40, 'left');
   check('the score lights more segments as it climbs',
-    bright.length > faint.length, `888 lights ${bright.length}, 000 lights ${faint.length}`);
-  check('the score sits in the corner the clock used to hold',
-    faint.length > 0 && Math.min(...faint.map(([col]) => col)) < 8,
+    bright.length > faint.length, `8888 lights ${bright.length}, 0000 lights ${faint.length}`);
+  check('the score sits in the top-left corner',
+    faint.length > 0 && Math.min(...faint.map(([col]) => col)) < 12,
     `leftmost lit column ${faint.length ? Math.min(...faint.map(([col]) => col)) : 'none'}`);
-  // The band the clock's removal freed: the bar moved up into it and the
-  // plane moved up behind the bar, so the rows between them are now clear.
-  // This is the reclaim, and it is the only assertion that would catch the
-  // readout quietly sprawling back down over the play area.
-  check('the rows freed below the readout are clear',
-    bandCells(dim.state, 31, 37).length === 0,
-    `${bandCells(dim.state, 31, 37).length} cells still lit between the bar and the plane`);
 
-  // Miss lamps: one more lights for each life spent, all of them in the half
-  // of the band the score does not occupy.
+  // Two boats roughly double a run's score -- the best measured runs land in
+  // the 800s and a strong player will pass a thousand. The readout has to
+  // hold what the game can actually produce, or the number silently stops
+  // counting partway through the best run someone ever has.
+  const thousand = createRescueGame({ seed: 1 });
+  thousand.state.score = 1000;
+  const nines = createRescueGame({ seed: 1 });
+  nines.state.score = 999;
+  const key = (state) => bandCells(state, 0, 40, 'left').map(String).sort().join('|');
+  check('a score past 999 still changes the readout', key(thousand.state) !== key(nines.state));
+
+  // Four glyphs wide, not three: the fourth has to be drawn, not merely
+  // survivable. Anything narrower means the thousands digit fell off.
+  const spanned = Math.max(...bright.map(([col]) => col)) - Math.min(...bright.map(([col]) => col)) + 1;
+  const glyph = Math.floor(spanned / 4);
+  check('the score readout is four digits wide', spanned >= 4 * glyph && glyph >= 13,
+    `score band spans ${spanned} cells, about ${glyph} per digit`);
+
   const lampCounts = [];
   for (let misses = 0; misses <= 4; misses++) {
-    const s = createParachuteGame({ seed: 1 });
+    const s = createRescueGame({ seed: 1 });
     s.state.score = 0;
     s.state.misses = misses;
-    lampCounts.push(bandCells(s.state, 8, 18, 'right').length);
+    lampCounts.push(bandCells(s.state, 14, 26, 'right').length);
   }
   const perLamp = lampCounts[1] - lampCounts[0];
   check('a miss lamp lights for each life spent',
     perLamp > 0 && lampCounts.every((n, i) => n === lampCounts[0] + perLamp * i),
     lampCounts.join(', '));
 
-  const spentAll = createParachuteGame({ seed: 1 });
+  const spentAll = createRescueGame({ seed: 1 });
   spentAll.state.score = 0;
   spentAll.state.misses = 4;
-  const before = new Set(bandCells(dim.state, 0, 25).map(String));
-  const added = bandCells(spentAll.state, 0, 25).filter((cell) => !before.has(String(cell)));
+  const before = new Set(bandCells(dim.state, 0, 40).map(String));
+  const added = bandCells(spentAll.state, 0, 40).filter((cell) => !before.has(String(cell)));
   check('the miss lamps sit opposite the score',
     added.length > 0 && added.every(([col]) => col >= GRID_WIDTH / 2),
     `${added.filter(([col]) => col < GRID_WIDTH / 2).length} of ${added.length} lamp cells on the score's side`);
 
-  // Time bar: full at the start, empty at the end.
-  const fresh = createParachuteGame({ seed: 1 });
-  const spent = createParachuteGame({ seed: 1 });
+  const fresh = createRescueGame({ seed: 1 });
+  const spent = createRescueGame({ seed: 1 });
   spent.state.step = RUN_STEPS;
-  const barFull = bandCells(fresh.state, 26, 32).length;
-  const barGone = bandCells(spent.state, 26, 32).length;
+  const barFull = bandCells(fresh.state, 41, 48).length;
+  const barGone = bandCells(spent.state, 41, 48).length;
   check('the time bar empties as the run runs out',
     barFull > 0 && barGone === 0, `${barFull} lit at the start, ${barGone} at the end`);
+
+  // Nothing from the play area may creep up into the band the readout owns.
+  check('the readout band is clear below the time bar',
+    bandCells(dim.state, 49, 53).length === 0,
+    `${bandCells(dim.state, 49, 53).length} cells lit between the bar and the ship`);
 }
 
-// --- ghost opacity stays in the intended band
+/* -- the control surface ------------------------------------------------ */
+//
+// orderAt is the entire control scheme, so what a touch means is asserted
+// rather than trusted: the half you touch has to pick the boat, and the
+// column has to pick the nearest dock.
+{
+  const cellPx = SCALE;
+  const at = (col) => harness.renderer.orderAt(col * cellPx + cellPx / 2);
+
+  const wrongSide = [];
+  for (let col = 0; col < GRID_WIDTH; col++) {
+    const expected = col < GRID_WIDTH / 2 ? 0 : 1;
+    if (at(col).side !== expected) wrongSide.push(col);
+  }
+  check('the half of the panel you touch picks the boat', wrongSide.length === 0,
+    `${wrongSide.length} columns addressed the wrong boat`);
+
+  const wrongDock = [];
+  for (let side = 0; side < SIDES; side++) {
+    for (let dock = 0; dock < DOCKS_PER_SIDE; dock++) {
+      const got = at(LAYOUT.DOCK_CENTRE[side][dock]);
+      if (got.side !== side || got.dock !== dock) wrongDock.push(`${side}/${dock} -> ${got.side}/${got.dock}`);
+    }
+  }
+  check('touching a dock orders that dock', wrongDock.length === 0, wrongDock.slice(0, 3).join(', '));
+
+  // A thumb at the very edge of the glass, outside the letterboxed board,
+  // still has to reach the outermost dock -- that is where the shore is, and
+  // it is exactly where a thumb sits when the panel is narrower than the
+  // phone.
+  const farLeft = harness.renderer.orderAt(-40);
+  const farRight = harness.renderer.orderAt(GRID_WIDTH * cellPx + 40);
+  check('a touch past the edge of the board still orders the shore',
+    farLeft.side === 0 && farLeft.dock === 0 && farRight.side === 1 && farRight.dock === 0,
+    `${JSON.stringify(farLeft)} / ${JSON.stringify(farRight)}`);
+}
+
+/* -- ghost opacity stays in the intended band --------------------------- */
 {
   check('ghost opacity is subtle', (() => {
     const m = GHOST.match(/([\d.]+)\)$/);
@@ -341,22 +567,25 @@ check('the backing store matches the grid',
   })(), GHOST);
 }
 
-// --- the renderer must not write to game state
+/* -- the renderer must not write to game state -------------------------- */
 {
-  const game = createParachuteGame({ seed: 12345 });
-  for (let i = 0; i < 400; i++) game.update({ left: true, right: false });
+  const game = createRescueGame({ seed: 12345 });
+  for (let i = 0; i < 600; i++) game.update({ left: 0, right: 2 });
   const before = JSON.stringify(game.state);
   harness.draw(game.state, { badge: 'PRACTICE' });
   check('draw does not mutate game state', JSON.stringify(game.state) === before);
 }
 
-// --- degenerate viewport
+/* -- degenerate viewport ------------------------------------------------ */
 {
   const tiny = createHarness();
   tiny.canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1, height: 1 });
   let survived = true; let message = '';
-  try { tiny.renderer.resize(); tiny.draw(createParachuteGame({ seed: 1 }).state, {}); }
-  catch (error) { survived = false; message = error.message; }
+  try {
+    tiny.renderer.resize();
+    tiny.draw(createRescueGame({ seed: 1 }).state, {});
+    tiny.renderer.orderAt(0);
+  } catch (error) { survived = false; message = error.message; }
   check('survives a 1x1 viewport', survived, message);
 }
 

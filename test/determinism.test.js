@@ -13,16 +13,26 @@ import { createHash } from 'node:crypto';
 import { createRng } from '../src/rng.js';
 import { createLoop, FIXED_STEP_MS } from '../src/loop.js';
 import {
-  createParachuteGame,
+  createRescueGame,
   RUN_STEPS,
   MAX_MISSES,
-  LANES,
-  STOPS,
+  SIDES,
+  DOCKS_PER_SIDE,
   SHORE_DOCK,
-  CAPACITY,
+  INNER_DOCK,
+  LANE_DOCK,
+  LANES_PER_SIDE,
+  MIN_LANE_DOCK,
+  ARC_STOPS,
   SPLASH_STOP,
-  SHORE_GAP,
-} from '../src/games/parachute.js';
+  CAPACITY,
+  CROWD_PER_SIDE,
+  SHARK_DOCKS,
+  SPLASH_STEPS,
+  SPLASH_FRAME_COUNT,
+  MISS_CAUSES,
+  splashFrame,
+} from '../src/games/rescue.js';
 import {
   dailySeed,
   puzzleNumber,
@@ -213,25 +223,31 @@ check(
 );
 
 
+
+
 // -----------------------------------------------------------------------
-// Parachute rescue
+// Ship rescue
 // -----------------------------------------------------------------------
 
 /**
- * A blind input script: a fixed pattern of held directions, derived from its
- * own seeded RNG so it is a fixed sequence rather than a live reaction.
- * Two runs given the same script must agree exactly.
+ * A blind order script, derived from its own seeded RNG so it is a fixed
+ * sequence rather than a live reaction.
+ *
+ * Shaped like a thumb rather than like a controller: one side is addressed at
+ * a time, and the order stands for a while before the next one. That is what
+ * the real input produces, so it is what a replay has to be able to reproduce.
  */
-function recordInputScript(seed, steps) {
+function recordOrderScript(seed, steps) {
   const rng = createRng(seed);
   const script = new Array(steps);
-  let held = { left: false, right: false };
+  let held = { left: null, right: null };
   let holdUntil = 0;
 
   for (let step = 0; step < steps; step++) {
     if (step >= holdUntil) {
-      const choice = rng.nextIntExclusive(0, 3);
-      held = { left: choice === 0, right: choice === 1 };
+      const side = rng.nextIntExclusive(0, SIDES);
+      const dock = rng.nextIntExclusive(0, DOCKS_PER_SIDE);
+      held = { left: side === 0 ? dock : null, right: side === 1 ? dock : null };
       holdUntil = step + rng.nextIntExclusive(6, 40);
     }
     script[step] = held;
@@ -240,55 +256,70 @@ function recordInputScript(seed, steps) {
 }
 
 /**
- * A reactive policy: steer toward the lowest unresolved parachutist. Reading
- * state makes input a function of the simulation, which is still fully
- * deterministic -- and unlike the blind script it reliably scores, so the
- * test would catch a game that silently stopped registering catches.
+ * A reactive policy: send each boat to whichever jumper on its side is
+ * furthest down, and run for the shore once it is full. Reading state makes
+ * input a function of the simulation, which is still fully deterministic --
+ * and unlike the blind script it reliably scores, so the test would catch a
+ * game that silently stopped registering catches.
  */
 function chasePolicy(state) {
-  // Full boat: the only legal move is the shore.
-  if (state.aboard >= CAPACITY) {
-    return { left: state.boatDock > SHORE_DOCK, right: state.boatDock < SHORE_DOCK };
+  const order = { left: null, right: null };
+  for (let side = 0; side < SIDES; side++) {
+    const boat = state.boats[side];
+    const key = side === 0 ? 'left' : 'right';
+    if (boat.aboard >= CAPACITY) {
+      order[key] = SHORE_DOCK;
+      continue;
+    }
+    let target = null;
+    for (const j of state.jumpers) {
+      if (j.side !== side) continue;
+      if (target === null || j.stop > target.stop) target = j;
+    }
+    if (target !== null) order[key] = LANE_DOCK[target.lane];
+    else if (boat.aboard > 0) order[key] = SHORE_DOCK;
   }
-  let target = null;
-  for (const p of state.parachutists) {
-    if (p.doomed) continue;
-    if (target === null || p.stop > target.stop) target = p;
-  }
-  if (target === null) return { left: false, right: false };
-  return { left: target.lane < state.boatDock, right: target.lane > state.boatDock };
+  return order;
 }
 
 /** Play a full run and return a trace plus the final outcome. */
 function playScripted(seed, script) {
-  const game = createParachuteGame({ seed });
+  const game = createRescueGame({ seed });
   const trace = [];
   for (let step = 0; step < script.length && !game.isOver; step++) {
     game.update(script[step]);
     const s = game.state;
     trace.push(
-      `${s.step}|${s.score}|${s.rescued}|${s.aboard}|${s.misses}|${s.boatDock}|` +
-      `${s.parachutists.map((p) => `${p.id}:${p.lane}:${p.stop}:${p.doomed ? 1 : 0}`).join(';')}|` +
-      `${s.sharks.map((k) => `${k.id}:${k.pos}:${k.dir}`).join(';')}`
+      `${s.step}|${s.score}|${s.rescued}|${s.misses}|` +
+      `${s.boats.map((b) => `${b.dock}:${b.target}:${b.aboard}:${b.waiting}`).join(',')}|` +
+      `${s.jumpers.map((j) => `${j.id}:${j.side}:${j.lane}:${j.stop}`).join(';')}|` +
+      `${s.sharks.map((k) => `${k.id}:${k.side}:${k.pos}:${k.dir}`).join(';')}|` +
+      `${s.splashes.map((x) => `${x.side}:${x.lane}:${x.age}`).join(';')}`
     );
   }
   return { game, trace: trace.join('\n'), state: game.state };
 }
 
 function playReactive(seed) {
-  const game = createParachuteGame({ seed });
+  const game = createRescueGame({ seed });
   const trace = [];
   while (!game.isOver) {
     game.update(chasePolicy(game.state));
     const s = game.state;
-    trace.push(`${s.step}|${s.score}|${s.rescued}|${s.aboard}|${s.misses}|${s.boatDock}`);
+    trace.push(`${s.step}|${s.score}|${s.rescued}|${s.misses}|${s.boats.map((b) => `${b.dock}:${b.aboard}`).join(',')}`);
   }
   return { game, trace: trace.join('\n'), state: game.state };
 }
 
-// Seed 31 gives a script that actually delivers survivors; a script that
-// scores zero would let the final-score assertion below pass on 0 === 0.
-const script = recordInputScript(31, RUN_STEPS);
+// Seed 10 gives a script that actually delivers passengers; a script that
+// scored zero would let the final-score assertion below pass on 0 === 0.
+//
+// Blind input scores far more readily than it did in the old game -- 165 of
+// the first 200 script seeds deliver someone, against 40 of the first 400
+// before the rebuild. That is the order-based control showing up in the
+// numbers: a random order still parks a boat somewhere useful and leaves it
+// there, where a random held direction mostly drove into a wall.
+const script = recordOrderScript(10, RUN_STEPS);
 
 const scriptedA = playScripted(12345, script);
 const scriptedB = playScripted(12345, script);
@@ -296,31 +327,53 @@ const gameBytesA = Buffer.from(scriptedA.trace, 'utf8');
 const gameBytesB = Buffer.from(scriptedB.trace, 'utf8');
 
 check(
-  'same seed + same input script produces an identical final score',
+  'same seed + same order script produces an identical final score',
   scriptedA.state.score === scriptedB.state.score,
   `${scriptedA.state.score} vs ${scriptedB.state.score}`
 );
 check(
-  'same seed + same input script produces a byte-identical run',
+  'same seed + same order script produces a byte-identical run',
   gameBytesA.length === gameBytesB.length && Buffer.compare(gameBytesA, gameBytesB) === 0
 );
 check(
-  'same seed + same input script ends the same way',
+  'same seed + same order script ends the same way',
   scriptedA.state.step === scriptedB.state.step &&
     scriptedA.state.endReason === scriptedB.state.endReason,
   `${scriptedA.state.step}/${scriptedA.state.endReason} vs ${scriptedB.state.step}/${scriptedB.state.endReason}`
 );
 
-const scriptedOtherSeed = playScripted(12346, script);
+check('a different seed changes the run', playScripted(12346, script).trace !== scriptedA.trace);
 check(
-  'a different seed changes the run',
-  scriptedOtherSeed.trace !== scriptedA.trace
+  'a different order script changes the run',
+  playScripted(12345, recordOrderScript(15, RUN_STEPS)).trace !== scriptedA.trace
 );
 
-const otherScript = recordInputScript(15, RUN_STEPS);
+// An order to one boat must not disturb the other. With two boats sharing one
+// update() this is the mistake that would be easiest to make and hardest to
+// see: the run would still be deterministic, just wrong.
 check(
-  'a different input script changes the run',
-  playScripted(12345, otherScript).trace !== scriptedA.trace
+  'an order to one boat leaves the other one under its own standing order',
+  (() => {
+    const game = createRescueGame({ seed: 5 });
+    game.update({ left: SHORE_DOCK, right: null });
+    const rightTarget = game.state.boats[1].target;
+    for (let i = 0; i < 60; i++) game.update({ left: INNER_DOCK, right: null });
+    return game.state.boats[1].target === rightTarget;
+  })()
+);
+
+// A null order is not the same as an order to stay put: the boat has to keep
+// running the errand it was already given, which is the whole reason one
+// thumb can drive two boats.
+check(
+  'a boat keeps running its last order while the thumb is elsewhere',
+  (() => {
+    const game = createRescueGame({ seed: 5 });
+    game.update({ left: SHORE_DOCK, right: null });
+    const startedAt = game.state.boats[0].dock;
+    for (let i = 0; i < 200; i++) game.update({ left: null, right: null });
+    return game.state.boats[0].dock === SHORE_DOCK && startedAt !== SHORE_DOCK;
+  })()
 );
 
 
@@ -333,37 +386,32 @@ check(
 // deliberate decision rather than a number to re-baseline.
 //
 // It pins a digest of the whole trace, not just the closing summary. The
-// summary alone is far too coarse: widening the run to the shore moved the
-// boat onto docks that had not existed before, from step 22 of this very
-// seed, and still ended on the same score, rescues, misses and step. A
-// fingerprint that reads "unchanged" through a change like that is worse
-// than none, because it is trusted. The summary is kept alongside so a
+// summary alone is far too coarse: in the old game, widening the run to the
+// shore moved the boat onto docks that had not existed before from step 22 of
+// a seed, and the run still ended on the same score, rescues, misses and
+// step. A fingerprint that reads "unchanged" through a change like that is
+// worse than none, because it is trusted. The summary is kept alongside so a
 // failure says something human before it says a hash mismatched.
 //
-// Re-baselined three times, all before release:
-//   1. when positions became discrete LCD segments (lanes and stops rather
-//      than columns and fixed-point rows);
-//   2. when the rescue loop landed -- boat capacity, the shore run and sharks
-//      all draw from the same RNG stream, and the difficulty ramp was retuned
-//      around them, so no pre-rescue run could survive unchanged;
-//   3. when the unload was shortened and paid for with open water between the
-//      last lane and the shore, which changes both the dock range the boat
-//      moves over and when deliveries land, and so the spawn ramp with them;
-//   4. when the unload became instant and SHORE_GAP grew to 5 to pay for it.
-//      The dock range widened again, and delivery now lands on the step the
-//      boat touches the shore rather than 50 steps later, so every rescue in
-//      a run shifts and the difficulty ramp shifts under it.
+// Re-baselined five times for the parachute game, all before release, and
+// then once more here:
+//   6. the rebuild. The parachute descent became a dual-panel ship rescue:
+//      two boats under independent orders rather than one under a held
+//      direction, six jump lanes rather than four descent lanes, a crowd on
+//      the ship that the spawner draws from, and every tuning constant reset
+//      against a harness that models a thumb. Nothing about the old seed
+//      survives, and nothing was meant to.
 const GOLDEN = {
   seed: 12345,
-  scriptSeed: 31,
-  score: 30,
-  rescued: 3,
+  scriptSeed: 10,
+  score: 60,
+  rescued: 6,
   misses: 4,
-  step: 1075,
+  step: 1293,
   endReason: 'misses',
-  trace: '5c5f1174d2aff56c',
+  trace: '4c6d4fb36d04047a',
 };
-const golden = playScripted(GOLDEN.seed, recordInputScript(GOLDEN.scriptSeed, RUN_STEPS));
+const golden = playScripted(GOLDEN.seed, recordOrderScript(GOLDEN.scriptSeed, RUN_STEPS));
 const goldenRun = golden.state;
 const goldenTrace = createHash('sha256').update(golden.trace).digest('hex').slice(0, 16);
 check(
@@ -383,47 +431,85 @@ check(
 // fixed-point and no floats anywhere in a position, there is nothing left to
 // accumulate rounding error over a long run.
 {
-  const game = createParachuteGame({ seed: 12345 });
+  const game = createRescueGame({ seed: 12345 });
   let allIntegers = true;
   let allInRange = true;
-  let boatInRange = true;
+  let crowdSane = true;
 
   while (!game.isOver) {
     game.update(chasePolicy(game.state));
     const s = game.state;
 
-    if (!Number.isInteger(s.boatDock)) allIntegers = false;
-    if (s.boatDock < 0 || s.boatDock > SHORE_DOCK) boatInRange = false;
+    for (const boat of s.boats) {
+      if (!Number.isInteger(boat.dock) || !Number.isInteger(boat.target)) allIntegers = false;
+      if (boat.dock < SHORE_DOCK || boat.dock > INNER_DOCK) allInRange = false;
+      if (boat.target < SHORE_DOCK || boat.target > INNER_DOCK) allInRange = false;
+      if (!Number.isInteger(boat.aboard) || boat.aboard < 0 || boat.aboard > CAPACITY) allInRange = false;
+      if (!Number.isInteger(boat.waiting) || boat.waiting < 0 || boat.waiting > CROWD_PER_SIDE) {
+        crowdSane = false;
+      }
+    }
 
-    for (const p of s.parachutists) {
-      if (!Number.isInteger(p.lane) || !Number.isInteger(p.stop)) allIntegers = false;
-      if (p.lane < 0 || p.lane >= LANES) allInRange = false;
-      if (p.stop < 0 || p.stop > SPLASH_STOP) allInRange = false;
+    for (const j of s.jumpers) {
+      if (!Number.isInteger(j.side) || !Number.isInteger(j.lane) || !Number.isInteger(j.stop)) {
+        allIntegers = false;
+      }
+      if (j.side < 0 || j.side >= SIDES) allInRange = false;
+      if (j.lane < 0 || j.lane >= LANES_PER_SIDE) allInRange = false;
+      if (j.stop < 0 || j.stop > SPLASH_STOP) allInRange = false;
     }
 
     for (const k of s.sharks) {
       if (!Number.isInteger(k.pos)) allIntegers = false;
-      if (k.pos < -1 || k.pos > LANES) allInRange = false;
+      // A shark is kept one step past either end of its patrol so the step
+      // that carries it off the board is legal.
+      if (k.pos < SHARK_DOCKS[0] - 1 || k.pos > SHARK_DOCKS[SHARK_DOCKS.length - 1] + 1) {
+        allInRange = false;
+      }
+    }
+
+    for (const x of s.splashes) {
+      if (!Number.isInteger(x.age) || !Number.isInteger(x.side) || !Number.isInteger(x.lane)) {
+        allIntegers = false;
+      }
+      if (x.age < 0 || x.age >= SPLASH_STEPS) allInRange = false;
+      const frame = splashFrame(x);
+      if (!Number.isInteger(frame) || frame < 0 || frame >= SPLASH_FRAME_COUNT) allInRange = false;
     }
   }
 
   check('every position is an integer', allIntegers);
-  check('every parachutist sits on a real lane and stop', allInRange);
-  check('the boat sits on a real dock', boatInRange);
+  check('every entity sits on a real segment of the board', allInRange);
+  check('the crowd on deck never goes negative or grows', crowdSane);
 }
 
-// The shore sits past the last lane with SHORE_GAP docks of open water in
-// between -- water the boat can cross but cannot catch or be bitten in, which
-// is what makes the trip, rather than the unload, the price of a delivery.
+// The layout: two mirrored sides, the shore at the outer end of each, and no
+// jump lane close enough to it that the ferry could be skipped.
 check(
   'the layout is a small fixed set of segments',
-  Number.isInteger(LANES) &&
-    Number.isInteger(STOPS) &&
-    Number.isInteger(SHORE_GAP) &&
-    SHORE_GAP >= 0 &&
-    SHORE_DOCK === LANES + SHORE_GAP &&
-    STOPS > 1,
-  `${LANES} lanes, ${STOPS} stops, ${SHORE_GAP} of open water, shore at ${SHORE_DOCK}`
+  Number.isInteger(SIDES) && SIDES === 2 &&
+    Number.isInteger(DOCKS_PER_SIDE) && DOCKS_PER_SIDE > 2 &&
+    SHORE_DOCK === 0 &&
+    INNER_DOCK === DOCKS_PER_SIDE - 1 &&
+    Number.isInteger(ARC_STOPS) && ARC_STOPS > 1 &&
+    SPLASH_STOP === ARC_STOPS,
+  `${SIDES} sides, ${DOCKS_PER_SIDE} docks, ${ARC_STOPS} arc stops`
+);
+
+check(
+  'each lane has its own dock, none of them the shore or beside it',
+  LANE_DOCK.length === LANES_PER_SIDE &&
+    MIN_LANE_DOCK === LANE_DOCK[0] &&
+    LANE_DOCK.every((d, i) =>
+      Number.isInteger(d) && d > SHORE_DOCK + 1 && d <= INNER_DOCK && (i === 0 || d > LANE_DOCK[i - 1])
+    ),
+  JSON.stringify(LANE_DOCK)
+);
+
+check(
+  'the shore is out of reach of every shark',
+  SHARK_DOCKS.every((d) => d > SHORE_DOCK) && SHARK_DOCKS.length > 0,
+  `sharks patrol ${SHARK_DOCKS.join(', ')}`
 );
 
 check(
@@ -442,29 +528,80 @@ check(
 // Guards against the game silently scoring nothing, which would make every
 // determinism assertion above pass on a broken game.
 check(
-  'a competent player actually delivers survivors',
-  reactiveA.state.rescued > 4 && reactiveA.state.score > 0,
+  'a competent player actually delivers passengers',
+  reactiveA.state.rescued > 8 && reactiveA.state.score > 0,
   `rescued ${reactiveA.state.rescued}, score ${reactiveA.state.score}`
+);
+
+// Both boats have to be worth using. A run where one side never scores would
+// mean the second panel is decoration, which is the failure this whole design
+// is built to avoid.
+check(
+  'both sides of the board are actually played',
+  (() => {
+    const game = createRescueGame({ seed: 12345 });
+    const jumped = [0, 0];
+    let before = game.state.boats.map((b) => b.waiting);
+    while (!game.isOver) {
+      game.update(chasePolicy(game.state));
+      const now = game.state.boats.map((b) => b.waiting);
+      for (let side = 0; side < SIDES; side++) jumped[side] += before[side] - now[side];
+      before = now;
+    }
+    return jumped[0] > 4 && jumped[1] > 4;
+  })(),
+  'one side of the ship never sent anyone over'
 );
 
 check(
   'catching alone never scores -- only delivery does',
   (() => {
-    // Never move: the boat can still be landed on at its starting dock, but
-    // it never reaches the shore, so nothing may score.
-    const stuck = createParachuteGame({ seed: 4242 });
-    while (!stuck.isOver) stuck.update({ left: false, right: false });
+    // Never order anything: the boats sit at their starting docks, which are
+    // lanes, so catches happen but nothing ever reaches a shore.
+    const stuck = createRescueGame({ seed: 4242 });
+    while (!stuck.isOver) stuck.update({ left: null, right: null });
     return stuck.state.score === 0 && stuck.state.rescued === 0;
   })(),
   'a run that never reached shore still scored'
+);
+
+// Every miss is attributed, and the attribution adds up. The harness tunes
+// against these counts, so a cause that silently stopped being recorded would
+// quietly corrupt every tuning decision made afterwards.
+check(
+  'every miss is attributed to exactly one cause',
+  (() => {
+    const game = createRescueGame({ seed: 909 });
+    while (!game.isOver) game.update(chasePolicy(game.state));
+    const total = MISS_CAUSES.reduce((sum, cause) => sum + game.state.missCauses[cause], 0);
+    return total === game.state.misses && game.state.misses > 0;
+  })()
+);
+
+// A miss has to produce the flail-and-splash, and the splash has to clear
+// itself up. A leak here would grow the state object for the whole run.
+check(
+  'a miss raises a splash that ages out',
+  (() => {
+    const game = createRescueGame({ seed: 4242 });
+    let sawSplash = false;
+    let maxLive = 0;
+    while (!game.isOver) {
+      game.update({ left: null, right: null });
+      if (game.state.splashes.length > 0) sawSplash = true;
+      maxLive = Math.max(maxLive, game.state.splashes.length);
+      for (const x of game.state.splashes) if (x.age >= SPLASH_STEPS) return false;
+    }
+    return sawSplash && maxLive <= SIDES * LANES_PER_SIDE;
+  })()
 );
 
 // Both end conditions must be reachable.
 check(
   'running out of lives ends the run early',
   (() => {
-    const idle = createParachuteGame({ seed: 12345 });
-    while (!idle.isOver) idle.update({ left: false, right: false });
+    const idle = createRescueGame({ seed: 12345 });
+    while (!idle.isOver) idle.update({ left: null, right: null });
     return (
       idle.state.endReason === 'misses' &&
       idle.state.misses === MAX_MISSES &&
@@ -476,7 +613,6 @@ check(
 check(
   'a run that keeps its lives ends on the clock',
   (() => {
-    // Seed 7 is survivable by the chase policy for the full minute.
     const timed = playReactive(7);
     return timed.state.endReason === 'time' && timed.state.step === RUN_STEPS;
   })(),
@@ -488,18 +624,18 @@ check(
   (() => {
     const done = playScripted(12345, script).game;
     const before = JSON.stringify(done.state);
-    for (let i = 0; i < 100; i++) done.update({ left: true, right: false });
+    for (let i = 0; i < 100; i++) done.update({ left: SHORE_DOCK, right: SHORE_DOCK });
     return JSON.stringify(done.state) === before;
   })()
 );
 
 // The game must be driveable through the real loop at any frame rate.
-function playThroughLoop(seed, script, frameMs) {
-  const game = createParachuteGame({ seed });
+function playThroughLoop(seed, orders, frameMs) {
+  const game = createRescueGame({ seed });
   const loop = createLoop({
     update() {
       if (game.isOver) return;
-      game.update(script[game.state.step] || { left: false, right: false });
+      game.update(orders[game.state.step] || { left: null, right: null });
     },
   });
   while (!game.isOver && loop.stepCount < RUN_STEPS + 10) loop.advance(frameMs);

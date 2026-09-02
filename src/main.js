@@ -37,10 +37,14 @@ function boot() {
   if (devClock.reset) progress.reset();
 
   blockBrowserGestures();
-  const input = createInput(canvas);
   const panel = createPanel();
   const renderer = entry.createRenderer(canvas);
   renderer.resize();
+  // Input is built from the renderer, not beside it: a touch means a place on
+  // the board, and the renderer is the only thing that knows where the board
+  // was drawn. The shell still names no game -- the registry says what the
+  // control surface looks like.
+  const input = createInput(canvas, { ...entry.controls, orderAt: renderer.orderAt });
 
   /** @type {'idle'|'playing'} */
   let phase = 'idle';
@@ -179,7 +183,7 @@ function boot() {
     update() {
       if (phase !== 'playing') return;
 
-      game.update(input.state);
+      game.update(input.consume());
 
       if (game.isOver) {
         phase = 'idle';

@@ -115,6 +115,29 @@ export function createLcdSurface(canvas, { gridWidth, gridHeight }) {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
 
+  /**
+   * Which grid column a touch landed on.
+   *
+   * The panel is letterboxed inside the canvas, so a fraction of the canvas
+   * width is not a fraction of the board -- a thumb on the outermost dock is
+   * several cells off if you assume it is. Input has to ask the surface,
+   * because the surface is the only thing that knows where the board was
+   * actually drawn.
+   *
+   * Clamped to the board: a touch in the letterbox is the nearest edge
+   * rather than nothing, so the far dock stays reachable at the very edge of
+   * the glass where thumbs actually land.
+   *
+   * @param {number} clientX Viewport X, as reported by a pointer event.
+   * @returns {number} Column in 0 .. gridWidth - 1.
+   */
+  function columnAt(clientX) {
+    const rect = canvas.getBoundingClientRect();
+    const ratio = canvas.width / (rect.width || 1);
+    const col = Math.floor(((clientX - rect.left) * ratio - originX) / cell);
+    return col < 0 ? 0 : col >= gridWidth ? gridWidth - 1 : col;
+  }
+
   return {
     resize,
     clear,
@@ -123,6 +146,7 @@ export function createLcdSurface(canvas, { gridWidth, gridHeight }) {
     fillArea,
     drawText,
     flood,
+    columnAt,
     get colors() {
       return { ink, ground, ghost, dim };
     },

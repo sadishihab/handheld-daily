@@ -6,20 +6,29 @@
  * not change.
  */
 
-import { createParachuteGame } from './games/parachute.js';
-import { createParachuteRenderer } from './render/parachute.js';
+import { createRescueGame, DOCKS_PER_SIDE, INNER_DOCK } from './games/rescue.js';
+import { createRescueRenderer } from './render/rescue.js';
 
 export const GAMES = {
-  parachute: {
-    id: 'parachute',
-    title: 'PARACHUTE',
+  rescue: {
+    id: 'rescue',
+    title: 'SHIP RESCUE',
     /** (options: {seed: number}) => game */
-    create: createParachuteGame,
-    /** (canvas: HTMLCanvasElement) => {resize, draw(state)} */
-    createRenderer: createParachuteRenderer,
+    create: createRescueGame,
+    /** (canvas: HTMLCanvasElement) => {resize, draw(state), orderAt(clientX)} */
+    createRenderer: createRescueRenderer,
+    /**
+     * What the control surface is shaped like.
+     *
+     * The shell hands this to createInput along with the renderer's
+     * orderAt(). It is the only thing about a game's controls the shell has
+     * to carry, and it stays here rather than in input.js so that a second
+     * minigame with a different board does not have to edit the input module.
+     */
+    controls: { docks: DOCKS_PER_SIDE, startDock: INNER_DOCK },
   },
 };
 
 /** Which game today's puzzle plays. Eventually this can be picked by the
  *  daily seed to rotate games; for now there is only one. */
-export const DEFAULT_GAME_ID = 'parachute';
+export const DEFAULT_GAME_ID = 'rescue';

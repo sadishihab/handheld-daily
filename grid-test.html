@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#2b2e26">
+  <title>Grid grain test</title>
+  <link rel="stylesheet" href="styles/main.css">
+  <style>
+    /* The HUD is DOM text, not LCD segments: the whole point is to read the
+       numbers back off a phone, and dot-matrix glyphs at this size cannot be
+       read -- which is the very thing under test. */
+    .hud {
+      position: fixed;
+      left: 0; right: 0; bottom: 0;
+      padding: 0.5rem max(0.5rem, env(safe-area-inset-left))
+               max(0.5rem, env(safe-area-inset-bottom));
+      background: #2b2e26;
+      color: #a9b77c;
+      font: 600 11px/1.5 "SF Mono", Menlo, Consolas, monospace;
+      text-align: center;
+      letter-spacing: 0.02em;
+    }
+    .hud b { color: #d6e2a8; }
+    .hud span { opacity: 0.65; }
+  </style>
+</head>
+<body>
+  <main class="screen">
+    <h1 class="visually-hidden">Grid grain test</h1>
+    <div class="lcd" id="lcd">
+      <canvas id="screen" class="lcd__canvas" aria-label="Grid grain test. Tap to switch grid."></canvas>
+    </div>
+  </main>
+  <p class="hud" id="hud"></p>
+
+  <script type="module">
+    /*
+     * Grain test for the move from a 168-cell grid to a 252-cell one.
+     *
+     * The question is narrow: at 252 cells across, does a cell still read as
+     * a discrete LCD segment on a real phone, or has it gone fine enough to
+     * read as a smooth pixel?
+     *
+     * So this page uses the REAL LCD surface, the REAL stylesheet and the
+     * REAL seven-segment code. An inlined copy could differ in exactly the
+     * device-pixel-ratio arithmetic that decides the answer, which would
+     * make the test worse than not running it.
+     *
+     * Tap anywhere to switch between the two grids. Nothing here is final
+     * art: the figures exist to put the finest marks the panel will ever
+     * carry in front of the eye at true size.
+     */
+    import { createLcdSurface } from './src/render/lcd.js';
+    import { drawDigits, digitMetrics } from './src/render/segments.js';
+    import {
+      PASSENGER, DECK_PASSENGER, HULL, JUMPER_SPREAD, SHARK,
+    } from './src/render/sprites.js';
+
+    const canvas = document.getElementById('screen');
+    const hud = document.getElementById('hud');
+
+    /* -- provisional figures, at each grid's scale ---------------------- */
+
+    /** Today's 2-wide passenger and 11-wide hull, for the 168 comparison. */
+    const OLD = {
+      label: 'today',
+      grid: [168, 220],
+      passenger: ['.#', '##', '.#', '##'],
+      slotPitch: 3,
+      hull: [
+        '###########',
+        '###########',
+        '.#########.',
+        '..#######..',
+        '....###....',
+      ],
+      crowd: ['#', '#', '#'],
+      crowdPitch: 2,
+      crowdRows: 3,
+      jumper: ['.#.', '###', '.#.', '#.#'],
+      shark: [
+        '.......##........',
+        '......####.......',
+        '.....######......',
+        '#...##########...',
+        '###############..',
+        '#..############..',
+        '.....########....',
+      ],
+      digit: { unit: 3, len: 7 },
+    };
+
+    /**
+     * The proposed 3-wide passenger and 17-wide hull at 252.
+     *
+     * 168*6 and 252*4 are both 1008, so on a 3x phone these two grids fill
+     * exactly the same physical width -- the boat is the same size in
+     * millimetres either way. All that changes is how many cells it is cut
+     * into, which is what makes this an honest A/B rather than a comparison
+     * of a small boat against a big one.
+     */
+    const NEW = {
+      label: 'proposed',
+      grid: [252, 330],
+      // The real sprites, not copies. The whole value of this page is that
+      // what it puts on the glass is what the game will put on the glass.
+      passenger: PASSENGER,
+      slotPitch: 4,
+      hull: HULL,
+      crowd: DECK_PASSENGER,
+      crowdPitch: 5,
+      crowdRows: 2,
+      jumper: JUMPER_SPREAD,
+      shark: SHARK,
+      digit: { unit: 4, len: 9 },
+    };
+
+    let art = NEW;
+    let lcd = null;
+
+    function drawPattern(pattern, col, row, style) {
+      for (let y = 0; y < pattern.length; y++) {
+        const line = pattern[y];
+        let run = -1;
+        for (let x = 0; x <= line.length; x++) {
+          const lit = line[x] === '#';
+          if (lit && run === -1) run = x;
+          else if (!lit && run !== -1) { lcd.fillArea(col + run, row + y, x - run, 1, style); run = -1; }
+        }
+      }
+    }
+
+    const width = (p) => Math.max(...p.map((r) => r.length));
+    const half = (n) => Math.floor(n / 2);
+
+    function frame() {
+      const [GW, GH] = art.grid;
+      const { ink, ghost, dim } = lcd.colors;
+      lcd.clear();
+
+      const hullW = width(art.hull);
+      const slots = 4;
+      const slotSpan = slots * art.slotPitch - 1;
+      const slotInset = Math.floor((hullW - slotSpan) / 2);
+
+      /* --- readout: four digits, miss lamps, time bar ------------------ */
+      const dm = digitMetrics(art.digit.unit, art.digit.len);
+      drawDigits(lcd, '0888', 6, 3, { on: ink, off: ghost, ...art.digit });
+      for (let i = 0; i < 4; i++) {
+        const w = Math.round(GW / 21);
+        const col = GW - 6 - (4 - i) * Math.round(GW / 15);
+        lcd.fillArea(col, 12, w, Math.round(GH / 44), i < 2 ? ink : ghost);
+      }
+      const barRow = 4 + dm.height + 3;
+      lcd.fillArea(6, barRow, GW - 12, Math.max(2, Math.round(GH / 73)), ghost);
+      lcd.fillArea(6, barRow, Math.floor((GW - 12) * 0.62), Math.max(2, Math.round(GH / 73)), ink);
+
+      /* --- the crowd: the densest, finest thing the panel will carry ----
+         Half lit and half ghosted, which is what the deck looks like
+         mid-run and the hardest case for telling a segment from a smudge. */
+      const crowdTop = Math.round(GH * 0.16);
+      const perRow = Math.floor((GW - 16) / art.crowdPitch);
+      for (let r = 0; r < art.crowdRows; r++) {
+        for (let i = 0; i < perRow; i++) {
+          const col = 8 + i * art.crowdPitch;
+          // Thinned toward the ends, the way jumpers leave the deck.
+          const gone = i < perRow * 0.18 || i > perRow * 0.82 || (i + r) % 7 === 0;
+          drawPattern(art.crowd, col, crowdTop + r * (art.crowd.length + 2), gone ? ghost : ink);
+        }
+      }
+
+      /* --- jumpers in the air, lit and ghosted -------------------------- */
+      const jumpRow = Math.round(GH * 0.34);
+      const jumpW = width(art.jumper);
+      for (let i = 0; i < 6; i++) {
+        const col = Math.round(GW * (0.1 + i * 0.16)) - half(jumpW);
+        drawPattern(art.jumper, col, jumpRow + (i % 3) * (art.jumper.length + 3), i % 2 ? ink : ghost);
+      }
+
+      /* --- the dock row: six ghost moorings a side, one lit boat --------
+         This is the assertion the grid change exists to satisfy: four
+         passengers standing in a hull, readable as four separate people. */
+      const boatRow = Math.round(GH * 0.53);
+      const sideW = half(GW);
+      const pitch = Math.floor((sideW - hullW) / 5);
+      for (let side = 0; side < 2; side++) {
+        for (let dock = 0; dock < 6; dock++) {
+          const fromEdge = 2 + dock * pitch;
+          const left = side === 0 ? fromEdge : GW - hullW - fromEdge;
+          const style = side === 0 && dock === 3 ? ink : ghost;
+          drawPattern(art.hull, left, boatRow + art.passenger.length, style);
+          for (let s = 0; s < slots; s++) {
+            drawPattern(art.passenger, left + slotInset + s * art.slotPitch, boatRow, style);
+          }
+        }
+      }
+
+      /* --- a shark, the widest single sprite ---------------------------- */
+      drawPattern(art.shark, Math.round(GW * 0.28), Math.round(GH * 0.68), ink);
+      drawPattern(art.shark, Math.round(GW * 0.60), Math.round(GH * 0.68), ghost);
+
+      /* --- grain comb ---------------------------------------------------
+         Alternating single cells, then runs of 1, 2, 3, 4, 6 and 8. If the
+         alternating row reads as a grey wash rather than as separate dots,
+         the grid is too fine; the comb says how wide a mark has to be
+         before it separates cleanly. */
+      const combTop = Math.round(GH * 0.80);
+      for (let c = 0; c < GW - 8; c += 2) lcd.fillCell(4 + c, combTop, ink);
+      for (let c = 0; c < GW - 8; c += 2) lcd.fillCell(4 + c, combTop + 2, dim);
+      let x = 4;
+      for (const w of [1, 1, 2, 2, 3, 3, 4, 4, 6, 6, 8, 8]) {
+        if (x + w * 2 > GW - 4) break;
+        lcd.fillArea(x, combTop + 5, w, 6, ink);
+        x += w * 2;
+      }
+      // A one-cell rule the full width: the thinnest line the panel can
+      // draw, and the first thing to vanish if the grain is too fine.
+      lcd.fillArea(4, combTop + 14, GW - 8, 1, ink);
+      lcd.fillArea(4, combTop + 17, GW - 8, 2, ink);
+    }
+
+    function build() {
+      lcd = createLcdSurface(canvas, { gridWidth: art.grid[0], gridHeight: art.grid[1] });
+      lcd.resize();
+      frame();
+      report();
+    }
+
+    function report() {
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      const capped = Math.min(dpr, 3);
+      const [GW, GH] = art.grid;
+      const devCell = Math.max(1, Math.floor(Math.min(
+        Math.floor(rect.width * capped) / GW,
+        Math.floor(rect.height * capped) / GH
+      )));
+      const cssCell = devCell / capped;
+      const panelCss = (devCell * GW) / capped;
+      hud.innerHTML =
+        `<b>${art.label}</b> &nbsp; grid <b>${GW}×${GH}</b> &nbsp; cell <b>${devCell}</b> device px ` +
+        `(<b>${cssCell.toFixed(2)}</b> css px) &nbsp; panel <b>${panelCss.toFixed(0)}</b> css px<br>` +
+        `<span>dpr ${dpr} (capped ${capped}) &nbsp; viewport ${Math.round(rect.width)}×${Math.round(rect.height)} ` +
+        `&nbsp;— tap to switch grid</span>`;
+    }
+
+    canvas.addEventListener('pointerdown', (event) => {
+      event.preventDefault();
+      art = art === NEW ? OLD : NEW;
+      build();
+    });
+    window.addEventListener('resize', build);
+    window.addEventListener('orientationchange', build);
+    build();
+  </script>
+</body>
+</html>
