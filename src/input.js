@@ -25,7 +25,40 @@
  *
  * Holding still works and still steers: a held pointer re-issues its order
  * every step, so sliding a thumb along the panel drags the boat with it.
+ *
+ *
+ * THE TWO SCHEMES
+ * ---------------
+ * Both are shipped and switchable, because the argument between them is about
+ * feel and the harness can only settle the half of it that is arithmetic.
+ *
+ *   'side'    The half of the panel you touch picks the boat; the column
+ *             picks the dock. Two boats, addressed one at a time.
+ *   'mirror'  One input, both boats. The column picks a dock index and BOTH
+ *             boats take it, each measured from its own shore, so the pair is
+ *             always a mirror image. There is no boat to select and nothing to
+ *             cross to -- and no way to send one boat home while the other
+ *             waits at the ship, which is the price.
+ *
+ * Only this module knows the difference. The simulation still receives an
+ * order per side; mirror mode simply fills in both.
  */
+
+/** Scheme ids, in the order the start-screen toggle cycles them. */
+export const CONTROL_SCHEMES = ['side', 'mirror'];
+
+/** What the toggle calls each one. */
+export const SCHEME_LABEL = {
+  side: 'ONE AT A TIME',
+  mirror: 'BOTH TOGETHER',
+};
+
+export const DEFAULT_SCHEME = 'side';
+
+/** Coerce anything -- a query param, a stored string -- to a real scheme. */
+export function normaliseScheme(value) {
+  return CONTROL_SCHEMES.includes(value) ? value : DEFAULT_SCHEME;
+}
 
 /**
  * Stop the browser treating the panel like a document: no pinch zoom, no
@@ -67,8 +100,10 @@ export function blockBrowserGestures() {
  * @param {number} options.docks Docks per side, for the keyboard's range.
  * @param {number} [options.startDock] Where each boat begins, so the keyboard
  *   nudges from the same dock the simulation started the boat on.
+ * @param {'side'|'mirror'} [options.scheme] Which control scheme to start in.
  */
-export function createInput(target, { orderAt, docks, startDock = docks - 1 }) {
+export function createInput(target, { orderAt, docks, startDock = docks - 1, scheme = DEFAULT_SCHEME }) {
+  let mode = normaliseScheme(scheme);
   // Live object handed to the simulation each step. Mutated in place rather
   // than reallocated, and only ever between frames -- DOM events cannot fire
   // partway through the loop's synchronous run of fixed steps, so the value
@@ -92,12 +127,27 @@ export function createInput(target, { orderAt, docks, startDock = docks - 1 }) {
 
   const clamp = (dock) => (dock < 0 ? 0 : dock >= docks ? docks - 1 : dock);
 
+  /**
+   * Write one order into the pair, which is the only place the two schemes
+   * differ: 'side' addresses the boat the touch landed on, 'mirror' gives the
+   * dock to both. Everything downstream -- the standing order, the simulation,
+   * the replay -- is identical either way.
+   */
+  function issue(order, side, dock) {
+    if (mode === 'mirror') {
+      order[0] = dock;
+      order[1] = dock;
+      aim[0] = dock;
+      aim[1] = dock;
+      return;
+    }
+    order[side] = dock;
+    aim[side] = dock;
+  }
+
   function recompute() {
     const order = [pending[0], pending[1]];
-    for (const held of pointers.values()) {
-      order[held.side] = held.dock;
-      aim[held.side] = held.dock;
-    }
+    for (const held of pointers.values()) issue(order, held.side, held.dock);
     state.left = order[0];
     state.right = order[1];
     pending[0] = null;
@@ -125,12 +175,28 @@ export function createInput(target, { orderAt, docks, startDock = docks - 1 }) {
   }
 
   /**
-   * Desktop keys. A/D work the left boat, the arrows the right one, and on
+   * Desktop keys.
+   *
+   * Side-addressed: A/D work the left boat, the arrows the right one, and on
    * each side the outward key is the one that points at that boat's own
    * shore -- so "away from the ship" is always away from the middle of the
-   * keyboard as well as away from the middle of the screen.
+   * keyboard as well as away from the middle of the screen. Mirror mode has
+   * only one boat to speak of, and its mapping is in the branch below.
    */
   function keyOrder(code) {
+    // Mirror mode has no left boat and no right boat, only a distance from
+    // the shores, so every key means out or in. Left keys pull the pair out
+    // toward the land -- which does move the left boat left -- and right keys
+    // push it back in toward the ship.
+    if (mode === 'mirror') {
+      switch (code) {
+        case 'KeyA': case 'ArrowLeft': return [0, clamp(aim[0] - 1)];
+        case 'KeyD': case 'ArrowRight': return [0, clamp(aim[0] + 1)];
+        case 'KeyW': case 'ArrowUp': return [0, 0];
+        case 'KeyS': case 'ArrowDown': return [0, docks - 1];
+        default: return null;
+      }
+    }
     switch (code) {
       case 'KeyA': return [0, clamp(aim[0] - 1)];
       case 'KeyD': return [0, clamp(aim[0] + 1)];
@@ -148,8 +214,10 @@ export function createInput(target, { orderAt, docks, startDock = docks - 1 }) {
     const order = keyOrder(event.code);
     if (!order) return;
     const [side, dock] = order;
-    aim[side] = dock;
-    pending[side] = dock;
+    const pair = [null, null];
+    issue(pair, side, dock);
+    pending[0] = pair[0];
+    pending[1] = pair[1];
     recompute();
     event.preventDefault();
   }
@@ -179,6 +247,19 @@ export function createInput(target, { orderAt, docks, startDock = docks - 1 }) {
   return {
     /** Live order pair. Read each fixed step. */
     state,
+    get scheme() {
+      return mode;
+    },
+    /**
+     * Swap schemes between runs. Everything held is dropped first: a finger
+     * still down when the scheme changes would otherwise re-issue its old
+     * order under the new rules.
+     */
+    setScheme(next) {
+      mode = normaliseScheme(next);
+      releaseAll();
+      return mode;
+    },
     /**
      * Hand the current orders to one step and clear the one-shot ones.
      *

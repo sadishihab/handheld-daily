@@ -12,7 +12,8 @@
 
 import { today, puzzleNumber, msUntilNextPuzzle, cyrb53 } from './daily.js';
 import { createLoop } from './loop.js';
-import { createInput, blockBrowserGestures } from './input.js';
+import { createInput, blockBrowserGestures, CONTROL_SCHEMES, SCHEME_LABEL } from './input.js';
+import { createControlSetting } from './controls.js';
 import { createProgress } from './progress.js';
 import { createBrowserStorage } from './storage.js';
 import { formatShareText, deliverShare } from './share.js';
@@ -33,8 +34,10 @@ function boot() {
   const devClock = readDevClock();
   const now = createClock(devClock);
 
-  const progress = createProgress(createBrowserStorage());
+  const storage = createBrowserStorage();
+  const progress = createProgress(storage);
   if (devClock.reset) progress.reset();
+  const controlPref = createControlSetting(storage);
 
   blockBrowserGestures();
   const panel = createPanel();
@@ -44,7 +47,29 @@ function boot() {
   // the board, and the renderer is the only thing that knows where the board
   // was drawn. The shell still names no game -- the registry says what the
   // control surface looks like.
-  const input = createInput(canvas, { ...entry.controls, orderAt: renderer.orderAt });
+  const input = createInput(canvas, {
+    ...entry.controls,
+    orderAt: renderer.orderAt,
+    scheme: controlPref.scheme,
+  });
+
+  /**
+   * The control-scheme toggle, handed to whichever pre-run screen is up.
+   *
+   * Switching re-shows the screen so the button label is the truth rather
+   * than a memory of it, and it is only ever reachable between runs -- a
+   * scheme that changed mid-run would make the recorded orders unreplayable.
+   */
+  function controlToggle(reshow) {
+    return {
+      label: SCHEME_LABEL[controlPref.scheme],
+      onToggle: () => {
+        const next = CONTROL_SCHEMES[(CONTROL_SCHEMES.indexOf(controlPref.scheme) + 1) % CONTROL_SCHEMES.length];
+        input.setScheme(controlPref.set(next));
+        reshow();
+      },
+    };
+  }
 
   /** @type {'idle'|'playing'} */
   let phase = 'idle';
@@ -82,6 +107,7 @@ function boot() {
       puzzle: daily.puzzle,
       date: daily.date,
       streak: progress.streak,
+      control: controlToggle(showDaily),
       onPlay: () => startRun(daily.seed),
       onPractice: showPracticeStart,
     });
@@ -121,7 +147,11 @@ function boot() {
     phase = 'idle';
     resultIsFresh = false;
     lcd.classList.add('lcd--practice');
-    panel.showPracticeStart({ onPlay: startPractice, onExit: showDaily });
+    panel.showPracticeStart({
+      control: controlToggle(showPracticeStart),
+      onPlay: startPractice,
+      onExit: showDaily,
+    });
   }
 
   function startPractice() {
@@ -231,6 +261,8 @@ function boot() {
       return game;
     },
     progress,
+    controlPref,
+    input,
     devClock,
     loop,
   };

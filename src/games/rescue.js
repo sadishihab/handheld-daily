@@ -130,7 +130,7 @@ export const SPLASH_STOP = ARC_STOPS;
  * Passengers waiting on each side's deck at the start of a run.
  *
  * 46 a side, 92 across the ship, drawn as a dense block of small figures that
- * go out one at a time as they jump. A good run empties about 63% of them,
+ * go out one at a time as they jump. A good run empties about half of them,
  * which is enough for the thinning to read as progress from across the room.
  *
  * The number is a difficulty constant as much as a compositional one, which
@@ -159,33 +159,64 @@ export const FULL_BOAT_BONUS = 20;
  *
  * The single strongest difficulty lever in the game, because it is the price
  * of the ferry and the ferry is the game. Across the sweep it moved runs
- * ending on misses further than the spawn rate did: at the tuned spawn
+ * ending on misses further than the spawn rate did: at the original spawn
  * cadence, 11 steps a dock gives 30%, 12 gives 40%, 13 gives 65%.
  *
- * 13 puts a full round trip from the innermost lane at 130 steps, a little
- * over two seconds, against a jumper's fall of about 1.3 seconds at full
- * pressure. So a boat that leaves for the shore has given up the next jumper
- * on that side, and that is the trade the whole run is made of.
+ * Left alone when the rest of the game was slowed down, and that is the
+ * point of leaving it alone. 13 puts a full round trip from the innermost
+ * lane at 130 steps, a little over two seconds, against a fall that now takes
+ * about 1.8 seconds at full pressure. The boat did not get faster; the
+ * player got more time to decide where to send it. A boat that leaves for the
+ * shore has still given up the next jumper on that side, which is the trade
+ * the whole run is made of -- and the ferry still accounts for about half of
+ * all losses at the slower pace, which is how we know the trade survived.
  */
 const BOAT_MOVE_INTERVAL = 13;
 
+/**
+ * PACE
+ * ----
+ * Three constants set how fast the run feels, and playtesting said all three
+ * were too fast. They are not interchangeable, which the harness had to be
+ * asked about separately before any of them moved -- swept together they look
+ * like one dial, and they are not:
+ *
+ *   fall speed   slower is a pure win. It buys reaction time, and because a
+ *                slower arc is a longer catch window it RAISES the score
+ *                (597 -> 683 over 120 seeds for a slow hand) while leaving
+ *                the ferry's share of losses flat at about half.
+ *   jump rate    slower is the expensive one. Rarer jumpers means a boat can
+ *                finish a round trip between them, so the ferry stops costing
+ *                anything: at x1.8 the ferry's share of losses goes to 0% and
+ *                every remaining loss is simply arriving late. That is the
+ *                game's one decision being switched off.
+ *   ramp target  slower is mild and cheap; it just delays the top end.
+ *
+ * So the slowdown is weighted: a big cut to the fall, a small one to the jump
+ * rate, a moderate one to the ramp. Sharks are deliberately NOT slowed -- with
+ * everything else stretched they arrive relatively more often, which puts back
+ * a little of the pressure the fall gave up.
+ */
+
 /** Difficulty is a 0..RAMP_SCALE pressure value, not a raw step count. */
 const RAMP_SCALE = 1000;
-/** Rescues that alone would take difficulty to maximum. */
-const RESCUE_RAMP_TARGET = 26;
+/** Rescues that alone would take difficulty to maximum. Was 26. */
+const RESCUE_RAMP_TARGET = 30;
 const SCORE_RAMP_WEIGHT = 2;
 const TIME_RAMP_WEIGHT = 1;
 
-/** Steps between one arc stop and the next. */
-const FALL_INTERVAL_START = 38;
-const FALL_INTERVAL_END = 13;
+/** Steps between one arc stop and the next. Was 38 -> 13, which put a jumper
+ *  in the water faster than a thumb on a phone could answer them. */
+const FALL_INTERVAL_START = 50;
+const FALL_INTERVAL_END = 18;
 
-/** Steps between jumps. Both sides draw from this one cadence. */
-const SPAWN_INTERVAL_START = 98;
-const SPAWN_INTERVAL_END = 34;
-const SPAWN_INTERVAL_MIN = 30;
+/** Steps between jumps. Both sides draw from this one cadence. Eased by 15%,
+ *  which is as far as it goes before the ferry stops mattering. */
+const SPAWN_INTERVAL_START = 112;
+const SPAWN_INTERVAL_END = 40;
+const SPAWN_INTERVAL_MIN = 35;
 const SPAWN_JITTER = 8;
-const FIRST_SPAWN_STEP = 40;
+const FIRST_SPAWN_STEP = 46;
 
 /** Sharks. */
 const SHARK_INTERVAL_START = 900;

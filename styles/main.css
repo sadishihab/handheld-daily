@@ -216,6 +216,14 @@ body {
   border-color: var(--lcd-on);
 }
 
+/* A setting, not an action. Same tap target -- it is still a thumb pressing
+   it on a phone -- but it should not compete with PLAY for the eye. */
+.btn--quiet {
+  font-size: 0.85em;
+  color: color-mix(in srgb, var(--lcd-on) 70%, transparent);
+  border-color: color-mix(in srgb, var(--lcd-on) 22%, transparent);
+}
+
 .btn:active {
   background: color-mix(in srgb, var(--lcd-on) 28%, transparent);
 }

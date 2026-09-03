@@ -24,7 +24,7 @@ difficulty ramps with rescues rather than the clock alone.
 The run to the shore is the entire cost of a delivery. Touching land unloads
 the whole boat instantly -- there is no pause to wait out -- so what a run
 costs you is the time both boats spend out of position, with the ship filling
-the air behind them. Measured over 120 seeds, 62% of everything lost is lost
+the air behind them. Measured over 120 seeds, 53% of everything lost is lost
 to that errand.
 
 ## Two boats, one thumb
@@ -45,27 +45,83 @@ that forces a mode, and the boat you are not holding sits parked. So the game
 asks you to schedule two ferries rather than to steer two boats, which is a
 thing one thumb can actually do.
 
-It was measured rather than assumed, against bots that model a hand -- one
-touch at a time, ~200ms to notice a new jumper, ~250ms to cross the panel.
-Over 120 seeds:
+### The mirrored alternative
 
-| control | score | run | ended on misses | losses to a parked boat |
+A second scheme ships alongside it, chosen with the `CONTROL` button on the
+start screen or with `?control=mirror`:
+
+**Mirrored** -- one input, both boats. The column you touch picks a dock index
+and *both* boats take it, each measured from its own shore, so the pair is
+always a mirror image of itself. Nothing to select and nothing to cross to.
+The price is that there is no way to send one boat home while the other waits
+at the ship.
+
+Both schemes are shipped rather than one being chosen, because the argument
+between them is about feel and the harness can only settle the arithmetic
+half. The arithmetic half is not close, and it is below.
+
+### What the harness says
+
+Measured against bots that model a hand -- one touch at a time, a delay before
+a new jumper is noticed, a larger delay to carry the thumb across the panel.
+120 seeds each, at the pace the game currently runs, with the middling of the
+three hands (~370ms to notice a jumper, ~430ms to cross):
+
+| control | score | run | ended on misses | biggest cause of loss |
 | --- | --- | --- | --- | --- |
-| one thumb, orders | 636 | 57.1s | 58% | 5% |
-| two thumbs, orders | 660 | 59.2s | 21% | 1% |
-| select a boat, then steer it | 464 | 50.0s | 98% | 38% |
-| one input, both boats mirrored | 288 | 43.2s | 100% | 6% |
+| side-addressed, one thumb | 532 | 60.0s | 0% | the ferry, 53% |
+| side-addressed, two thumbs | 534 | 60.0s | 0% | the ferry, 50% |
+| mirrored, one input | 459 | 59.6s | 10% | a full boat, 51% |
+| select a boat, then steer it | 432 | 56.8s | 68% | the ferry, 54% |
 
-One thumb scores 0.96x of two thumbs: a phone player is not playing a degraded
-version. Select-and-steer loses 98% of its runs and 38% of its losses are a
-boat that was parked with nothing to do -- which is exactly the failure the
-scheme was predicted to have. Mirrored control cannot deliver on one side
-while catching on the other, and 26% of its losses are a boat that was already
-full.
+Two results matter here. The first is that **one thumb scores 532 against two
+thumbs' 534** -- the control costs essentially nothing, so a phone player is
+not playing a degraded version of the game.
 
-On a desktop, `A`/`D` work the left boat and the arrow keys the right one, on
-each side outward-key-to-its-own-shore; `W` and the up arrow send a boat
+The second is what mirrored loses, which is not points but the decision.
+Half of its losses are a boat that was already full and could not be sent
+home, and the ferry -- the thing the whole design exists to charge for --
+falls from 53% of losses to 7%. A mirrored player is not solving a cheaper
+version of the problem; they are solving a different one.
+
+### Controls on a desktop
+
+Side-addressed: `A`/`D` work the left boat and the arrow keys the right one,
+on each side outward-key-to-its-own-shore; `W` and the up arrow send a boat
 straight home.
+
+Mirrored: there is no left boat and no right boat, only a distance from the
+shores, so every key means out or in. `A` and the left arrow pull the pair out
+toward the land, `D` and the right arrow push it back in toward the ship, and
+`W`/up sends both straight home.
+
+## Pace
+
+The run was slowed down after playtesting, and the three constants that set
+the pace turned out not to be interchangeable:
+
+- **Fall speed** was stretched by about a third (`FALL_INTERVAL_START` 38 to
+  50). This is free and then some -- a slower arc is a longer catch window, so
+  it buys reaction time *and* raises the score, and the ferry's share of
+  losses does not move.
+- **Jump cadence** was eased by 15% (`SPAWN_INTERVAL_START` 98 to 112). This
+  one is expensive. With jumpers rarer, a boat can finish a round trip between
+  them and the ferry stops costing anything: pushed to +80%, the ferry's share
+  of losses reaches 0% and every remaining loss is simply arriving late. 15% is
+  as far as it goes before the game's one decision starts switching off.
+- **The ramp** was given four more rescues to climb (`RESCUE_RAMP_TARGET` 26
+  to 30). Mild and cheap.
+
+Sharks were deliberately left alone. With everything else stretched they
+arrive relatively more often, which puts back a little of the pressure the
+fall gave up.
+
+One honest caveat about the table above: at this pace the bots almost stop
+losing, so "ended on misses" is no longer a useful difficulty signal for
+them -- they have perfect anticipation and only a reaction delay, and slowing
+the game is exactly the thing that delay was fighting. The number that still
+discriminates is which cause the losses come from, which is why the table
+reports that rather than a difficulty percentage.
 
 ## Where the fiction bends
 
@@ -90,6 +146,7 @@ src/rng.js                 seeded PRNG (mulberry32) -- the only source of random
 src/daily.js               UTC daily seed, puzzle number, countdown to next puzzle
 src/loop.js                fixed-timestep loop, 60 logic steps/sec, decoupled from rAF
 src/input.js               touch and keyboard -> one order per boat, per step
+src/controls.js            which control scheme is in force, and where it is remembered
 src/progress.js            streaks, one-run-per-day, score history
 src/storage.js             localStorage adapter with an in-memory fallback
 src/share.js               share text formatting + Web Share / clipboard delivery
@@ -106,7 +163,7 @@ test/determinism.test.js   determinism suite
 test/progress.test.js      streaks, daily lockout, share text, dev clock
 test/styles.test.js        cascade rules the UI depends on
 test/render.test.js        segment layout, ghost board, crowd, painted-art collisions
-test/flow.test.js          end-to-end ritual against a mini-DOM
+test/flow.test.js          end-to-end ritual, and the control-scheme wiring, against a mini-DOM
 test/minidom.js            the mini-DOM the flow test boots the app in
 grid-test.html             dev-only: the cell grid at true size, for checking on a phone
 docs/DETERMINISM.md        rules simulation code must follow

@@ -113,6 +113,14 @@ and a recorded run is a list of integer pairs. Turning a touch position into a
 dock index happens in `src/render/`, outside the simulation, where a float
 coordinate is allowed to exist.
 
+That is also why there can be more than one control scheme without a second
+fingerprint. A scheme only decides which order pair a touch produces --
+side-addressed fills in one side, mirrored fills in both -- and the simulation
+never learns which one was used. A recorded run is the list of integer pairs,
+so the same list replays identically no matter which thumb, scheme or device
+generated it. Anything that made the simulation branch on the scheme would
+break this immediately and must not be added.
+
 Difficulty ramps on an integer 0..1000 "pressure" value blended from rescues
 and elapsed steps, rather than on a float fraction, for the same reason.
 

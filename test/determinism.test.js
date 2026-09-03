@@ -401,15 +401,24 @@ check(
 //      the ship that the spawner draws from, and every tuning constant reset
 //      against a harness that models a thumb. Nothing about the old seed
 //      survives, and nothing was meant to.
+//   7. the slowdown. Playtesting said the run was too fast to read, so the
+//      fall was stretched by about a third, the jump cadence by 15%, and the
+//      difficulty ramp given four more rescues to climb. Three constants, but
+//      every seeded run changes: a different fall interval moves every jumper
+//      and therefore every catch. The control schemes are NOT in this
+//      fingerprint and cannot be -- a scheme only decides which order pair
+//      reaches update(), and the fingerprint is taken over a fixed script of
+//      order pairs precisely so that it measures the simulation and not the
+//      hand.
 const GOLDEN = {
   seed: 12345,
   scriptSeed: 10,
-  score: 60,
-  rescued: 6,
+  score: 20,
+  rescued: 2,
   misses: 4,
-  step: 1293,
+  step: 854,
   endReason: 'misses',
-  trace: '4c6d4fb36d04047a',
+  trace: '784d08392e710d11',
 };
 const golden = playScripted(GOLDEN.seed, recordOrderScript(GOLDEN.scriptSeed, RUN_STEPS));
 const goldenRun = golden.state;
