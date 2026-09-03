@@ -6,7 +6,7 @@
  * not change.
  */
 
-import { createRescueGame, DOCKS_PER_SIDE, INNER_DOCK } from './games/rescue.js';
+import { createRescueGame, DOCKS, FAR_DOCK } from './games/rescue.js';
 import { createRescueRenderer } from './render/rescue.js';
 
 export const GAMES = {
@@ -25,7 +25,7 @@ export const GAMES = {
      * to carry, and it stays here rather than in input.js so that a second
      * minigame with a different board does not have to edit the input module.
      */
-    controls: { docks: DOCKS_PER_SIDE, startDock: INNER_DOCK },
+    controls: { docks: DOCKS, startDock: FAR_DOCK },
   },
 };
 

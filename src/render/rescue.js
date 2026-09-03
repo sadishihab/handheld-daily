@@ -37,16 +37,17 @@ import {
   JETTY,
   BOATHOUSE,
   PALM,
+  BUOY,
+  ISLAND,
   CLOUD_SMALL,
   CLOUD_LARGE,
 } from './sprites.js';
 import {
-  SIDES,
-  DOCKS_PER_SIDE,
+  DOCKS,
   LANE_DOCK,
-  LANES_PER_SIDE,
+  LANES,
   ARC_STOPS,
-  CROWD_PER_SIDE,
+  CROWD,
   CAPACITY,
   MAX_MISSES,
   RUN_STEPS,
@@ -57,20 +58,16 @@ import {
 /* -- Panel layout ------------------------------------------------------- */
 
 /**
- * A 252-cell grid, up from 168.
+ * A 252-cell grid.
  *
  * The panel is width-limited on a phone, so the grid width alone decides how
- * much detail any figure can carry. At 168 a passenger standing in the boat
- * was two cells wide and four of them read as one bar -- the thing the player
- * looks at for the whole run was the least legible thing on the glass.
- *
- * 168x6 and 252x4 are both 1008, so on a 3x phone the panel comes out the
- * same physical width either way: the boat is the same size in millimetres
- * and is simply cut into more cells. The cost is grain -- a cell drops from
- * about 2 CSS pixels to about 1.33 -- and on a 2x screen the integer-cell
- * rule bites harder, since 252 divides the available pixels less kindly than
- * 168 did. grid-test.html renders both and prints the numbers, which is how
- * that trade was checked on real glass rather than argued about.
+ * much detail any figure can carry. 168x6 and 252x4 are both 1008, so on a 3x
+ * phone the panel comes out the same physical width either way: the boat is
+ * the same size in millimetres and is simply cut into more cells. The cost is
+ * grain, and on a 2x screen the integer-cell rule bites harder, since 252
+ * divides the available pixels less kindly than 168 did. grid-test.html
+ * renders both and prints the numbers, which is how that trade was checked on
+ * real glass rather than argued about.
  */
 export const GRID_WIDTH = 252;
 export const GRID_HEIGHT = 330;
@@ -87,13 +84,12 @@ const half = (n) => Math.floor(n / 2);
 /**
  * Mirror a sprite's left cell to the other half of the board.
  *
- * The whole panel is symmetrical about the ship, so the right-hand side is
- * never laid out by hand -- it is the left-hand side reflected. That is the
- * only way two halves this detailed stay identical as the art is edited.
+ * The BOARD is no longer symmetrical -- there is one shore, at the near end.
+ * The SHIP still is: it lies across the top of the panel with the fire
+ * amidships, and its two ends are drawn once and reflected so they cannot
+ * drift apart as the art is edited. Nothing below the waterline uses this.
  */
 const mirrorCol = (col, width) => GRID_WIDTH - width - col;
-/** The same reflection for a centre line rather than a sprite's left edge. */
-const mirrorCentre = (col) => GRID_WIDTH - 1 - col;
 
 /* --- the readout band -------------------------------------------------- */
 
@@ -101,8 +97,8 @@ const EDGE_COL = 6;
 const READOUT_ROW = 3;
 const DIGIT_UNIT = 4;
 const DIGIT_LEN = 9;
-/** Four digits, not three: two boats roughly double a run's score, and the
- *  best measured runs land in the 800s where three digits had no headroom. */
+/** Four digits: a good run lands near 700 and the best measured ones pass
+ *  900, where three digits would have no headroom left. */
 const SCORE_DIGITS = 4;
 const MISS_ROW = 16;
 const MISS_W = 12;
@@ -130,40 +126,39 @@ const SHIP_HULL_H = 37;
 /**
  * Where each waiting passenger stands.
  *
- * Two rows of 23 a side, 46 in all, which is exactly CROWD_PER_SIDE -- the
- * deck is not a decoration sized to taste, it is the manifest drawn out.
+ * Two deck rows, two halves of the ship, 23 columns in each: 92 places, which
+ * is exactly CROWD. The deck is not a decoration sized to taste, it is the
+ * manifest drawn out.
  */
 const CROWD_ROWS = CROWD_ROW.length;
-const CROWD_COLUMNS = Math.ceil(CROWD_PER_SIDE / CROWD_ROWS);
+const CROWD_HALVES = 2;
+const CROWD_COLUMNS = CROWD / (CROWD_ROWS * CROWD_HALVES);
 const CROWD_PITCH = 5;
 const CROWD_LEFT = 8;
 
 /* --- the water --------------------------------------------------------- */
 
 /**
- * Docks, laid out from the outer edge inward.
+ * Docks, laid out from the shore seaward.
  *
- * Dock 0 is the shore. The pitch is the widest that fits all six docks in
- * half a panel without the two innermost hulls -- one per side -- running
- * into each other at the centre line, which is why it is 21 against a
- * 17-cell hull: four clear cells of water between neighbouring moorings, so
- * the ghost row reads as a line of separate berths.
+ * Dock 0 is the shore, at the near end of the panel; dock 4 is the far water
+ * under the ship's stern. Five moorings across a 252-cell panel is a 46-cell
+ * pitch against a 33-cell hull, so there are thirteen clear cells of water
+ * between neighbouring berths. The old two-boat board had to fit twelve
+ * moorings into the same width at a 21-cell pitch; this is what that cost,
+ * paid back.
  */
-const DOCK_PITCH = 21;
-const OUTER_DOCK_CENTRE = 12;
-const DOCK_CENTRE = Array.from({ length: SIDES }, (_, side) =>
-  Array.from({ length: DOCKS_PER_SIDE }, (_, dock) => {
-    const left = OUTER_DOCK_CENTRE + dock * DOCK_PITCH;
-    return side === 0 ? left : mirrorCentre(left);
-  })
-);
+const DOCK_PITCH = 46;
+const SHORE_CENTRE = 34;
+const DOCK_CENTRE = Array.from({ length: DOCKS }, (_, dock) => SHORE_CENTRE + dock * DOCK_PITCH);
 
 /** The centre line of each jump lane: the dock it comes down over. */
-const LANE_CENTRE = DOCK_CENTRE.map((docks) => LANE_DOCK.map((dock) => docks[dock]));
+const LANE_CENTRE = LANE_DOCK.map((dock) => DOCK_CENTRE[dock]);
 
-const SLOT_ROW = 244;
+const SLOT_ROW = 242;
 const HULL_ROW = 249;
-const SLOT_PITCH = PASSENGER_W + 1;
+/** Five-cell figures at a seven-cell pitch: two clear columns between each. */
+const SLOT_PITCH = PASSENGER_W + 2;
 const SLOT_INSET = Math.floor((HULL_W - (CAPACITY * SLOT_PITCH - 1)) / 2);
 
 const WATERLINE_ROW = 256;
@@ -176,29 +171,57 @@ const SHARK_ROW = 276;
 const STOP_ROW = [166, 182, 198, 213, 228, 243];
 
 /**
- * How far inboard of the landing column each stop sits.
+ * How far shorewards of the landing column each stop sits.
  *
- * A short arc, exactly as far as it can be: at the innermost lane the two
- * sides' arcs are only a few cells apart at the top of the drop, and a wider
- * swing would have left- and right-hand jumpers overlapping across the centre
- * line. The last two entries are zero because those are the stops a catch can
- * resolve on -- the jumper has to be over the boat's own column by then, or
- * the segment the player is reading is not the segment the rules are using.
+ * A long arc, and deliberately so. Two lanes is what makes the ferry cost
+ * anything (see LANE_DOCK in games/rescue.js) and the price of two lanes is
+ * that only two columns of the panel would ever have anyone falling down
+ * them. Swinging the jump out by most of a dock pitch means the pair of arcs
+ * sweeps a wide band on the way down -- the jumper leaves the rail near the
+ * fire amidships and is carried seaward as they fall.
+ *
+ * The last two entries are zero because those are the stops a catch can
+ * resolve on: the jumper has to be over the boat's own column by then, or the
+ * segment the player is reading is not the segment the rules are using.
  */
-const ARC_OFFSET = [5, 4, 3, 1, 0, 0];
+const ARC_OFFSET = [38, 31, 22, 11, 0, 0];
 
 /** Which pose a jumper is in at a given stop. */
 const jumperPose = (stop) => (stop < 3 ? JUMPER_SPREAD : JUMPER_TUCK);
 
 /* --- the shore --------------------------------------------------------- */
 
-const PALM_ROW = 213;
-const BOATHOUSE_ROW = 219;
+const PALM_COL = 1;
+const PALM_ROW = 190;
+const BOATHOUSE_COL = 22;
+const BOATHOUSE_ROW = 200;
+const JETTY_COL = 4;
 const JETTY_ROW = 258;
 const BEACH_ROW = JETTY_ROW + patternSize(JETTY).height;
-const BEACH_W = 26;
-/** The cliff edge outboard of the outermost dock. */
-const CLIFF_W = 4;
+const BEACH_W = 45;
+/** The headland outboard of the shore dock. */
+const CLIFF_W = 12;
+const CLIFF_ROW = 200;
+
+/** The channel marker at the seaward end, past the far dock. */
+const BUOY_COL = 240;
+const BUOY_ROW = 246;
+
+/**
+ * An island out in the near water, and the band of it that gets waves.
+ *
+ * The lanes are bunched at the far end of the board, so everything between
+ * the landing and the nearest lane is water the boat crosses and nothing ever
+ * happens on. Left bare it read as a quarter of the panel nobody had drawn
+ * on. NEAR_WATER_RIGHT stops short of the arcs: a wave lighting the same
+ * cells as a falling figure is exactly the confusion the ghost board exists
+ * to prevent.
+ */
+const ISLAND_COL = 58;
+const ISLAND_ROW = 206;
+const NEAR_WATER_TOP = 172;
+const NEAR_WATER_BOTTOM = 236;
+const NEAR_WATER_RIGHT = 126;
 
 /* --- the sky ----------------------------------------------------------- */
 
@@ -230,36 +253,40 @@ export const LAYOUT = {
   CROWD_COLUMNS,
   CROWD_PITCH,
   CROWD_LEFT,
+  DOCK_PITCH,
   mirrorCol,
-  mirrorCentre,
 
-  /** Left cell of a jumper sprite at (side, lane, stop). */
-  jumperCol(side, lane, stop) {
-    const centre = LANE_CENTRE[side][lane];
-    const offset = ARC_OFFSET[stop];
-    return (side === 0 ? centre + offset : centre - offset) - half(JUMPER_W);
+  /** Left cell of a jumper sprite at (lane, stop). */
+  jumperCol(lane, stop) {
+    return LANE_CENTRE[lane] - ARC_OFFSET[stop] - half(JUMPER_W);
   },
-  /** Left cell of the hull at (side, dock). */
-  hullCol(side, dock) {
-    return DOCK_CENTRE[side][dock] - half(HULL_W);
+  /** Left cell of the hull at `dock`. */
+  hullCol(dock) {
+    return DOCK_CENTRE[dock] - half(HULL_W);
   },
-  /** Left cell of a splash at (side, lane). */
-  splashCol(side, lane) {
-    return LANE_CENTRE[side][lane] - half(SPLASH_W);
+  /** Left cell of a splash in `lane`. */
+  splashCol(lane) {
+    return LANE_CENTRE[lane] - half(SPLASH_W);
   },
-  /** Left cell of a shark at (side, dock). */
-  sharkCol(side, dock) {
-    return DOCK_CENTRE[side][dock] - half(SHARK_W);
+  /** Left cell of a shark at `dock`. */
+  sharkCol(dock) {
+    return DOCK_CENTRE[dock] - half(SHARK_W);
   },
-  /** Where waiting passenger `slot` stands on `side`'s decks. */
-  crowdSlot(side, slot) {
-    // Counted inward-first: the passengers nearest the fire go over the side
-    // first, so the crowd thins from the middle of the ship outward.
-    const column = CROWD_COLUMNS - 1 - Math.floor(slot / CROWD_ROWS);
+  /**
+   * Where waiting passenger `slot` stands.
+   *
+   * Slots alternate between the two halves of the ship and count inward
+   * first, so the crowd empties from the fire amidships outward and stays
+   * even across the deck as it thins.
+   */
+  crowdSlot(slot) {
+    const shipHalf = slot % CROWD_HALVES;
+    const index = Math.floor(slot / CROWD_HALVES);
+    const column = CROWD_COLUMNS - 1 - Math.floor(index / CROWD_ROWS);
     const left = CROWD_LEFT + column * CROWD_PITCH;
     return {
-      col: side === 0 ? left : mirrorCol(left, DECK_PASSENGER_W),
-      row: CROWD_ROW[slot % CROWD_ROWS],
+      col: shipHalf === 0 ? left : mirrorCol(left, DECK_PASSENGER_W),
+      row: CROWD_ROW[index % CROWD_ROWS],
     };
   },
 };
@@ -267,21 +294,21 @@ export const LAYOUT = {
 export function createRescueRenderer(canvas) {
   const lcd = createLcdSurface(canvas, { gridWidth: GRID_WIDTH, gridHeight: GRID_HEIGHT });
   const paint = (pattern, col, row, style) => drawPattern(lcd, pattern, col, row, style);
-  /** Paint a pattern on the left, or its reflection on the right. */
-  const paintSide = (side, pattern, col, row, style) => {
-    const art = side === 0 ? pattern : flip(pattern);
-    const at = side === 0 ? col : mirrorCol(col, patternSize(pattern).width);
+  /** Paint a ship sprite on the left, or its reflection on the right. */
+  const paintShipSide = (shipHalf, pattern, col, row, style) => {
+    const art = shipHalf === 0 ? pattern : flip(pattern);
+    const at = shipHalf === 0 ? col : mirrorCol(col, patternSize(pattern).width);
     paint(art, at, row, style);
   };
 
   /* -- entity segments -------------------------------------------------- */
 
-  function jumperAt(side, lane, stop, style) {
-    paint(jumperPose(stop), LAYOUT.jumperCol(side, lane, stop), STOP_ROW[stop], style);
+  function jumperAt(lane, stop, style) {
+    paint(jumperPose(stop), LAYOUT.jumperCol(lane, stop), STOP_ROW[stop], style);
   }
 
-  function splashAt(side, lane, frame, style) {
-    paint(SPLASH_FRAMES[frame], LAYOUT.splashCol(side, lane), SPLASH_ROW, style);
+  function splashAt(lane, frame, style) {
+    paint(SPLASH_FRAMES[frame], LAYOUT.splashCol(lane), SPLASH_ROW, style);
   }
 
   /**
@@ -292,14 +319,14 @@ export function createRescueRenderer(canvas) {
    * all of them sit visible in the glass at once, so a doubled shark ghost is
    * exactly what the display it is imitating would show.
    */
-  function sharkAt(side, dock, facingLeft, style) {
-    const art = facingLeft ? SHARK : flip(SHARK);
-    paint(art, LAYOUT.sharkCol(side, dock), SHARK_ROW, style);
+  function sharkAt(dock, facingShore, style) {
+    const art = facingShore ? SHARK : flip(SHARK);
+    paint(art, LAYOUT.sharkCol(dock), SHARK_ROW, style);
   }
 
-  /** The boat on `side`, with `aboard` of its four slots occupied. */
-  function boatAt(side, dock, aboard, style, slotStyle) {
-    const left = LAYOUT.hullCol(side, dock);
+  /** The boat, with `aboard` of its four slots occupied. */
+  function boatAt(dock, aboard, style, slotStyle) {
+    const left = LAYOUT.hullCol(dock);
     paint(HULL, left, HULL_ROW, style);
     for (let slot = 0; slot < CAPACITY; slot++) {
       paint(
@@ -311,8 +338,8 @@ export function createRescueRenderer(canvas) {
     }
   }
 
-  function crowdAt(side, slot, style) {
-    const { col, row } = LAYOUT.crowdSlot(side, slot);
+  function crowdAt(slot, style) {
+    const { col, row } = LAYOUT.crowdSlot(slot);
     paint(DECK_PASSENGER, col, row, style);
   }
 
@@ -322,25 +349,21 @@ export function createRescueRenderer(canvas) {
    * An unlit LCD segment is still visible in the glass, and seeing the empty
    * board is what lets a player plan a dock ahead. It is also what makes the
    * panel read as populated when very little is happening: ninety-two deck
-   * positions, twelve docks and thirty-six places in the air are all faintly
-   * there whether or not anyone is standing in them.
+   * positions, five moorings with four seats each and twelve places in the
+   * air are all faintly there whether or not anyone is in them.
    */
   function drawGhostBoard() {
     const ghost = lcd.colors.ghost;
-    for (let side = 0; side < SIDES; side++) {
-      for (let slot = 0; slot < CROWD_PER_SIDE; slot++) crowdAt(side, slot, ghost);
-      for (let lane = 0; lane < LANES_PER_SIDE; lane++) {
-        for (let stop = 0; stop < ARC_STOPS; stop++) jumperAt(side, lane, stop, ghost);
-        for (let frame = 0; frame < SPLASH_FRAMES.length; frame++) {
-          splashAt(side, lane, frame, ghost);
-        }
-      }
-      for (const dock of SHARK_DOCKS) {
-        sharkAt(side, dock, true, ghost);
-        sharkAt(side, dock, false, ghost);
-      }
-      for (let dock = 0; dock < DOCKS_PER_SIDE; dock++) boatAt(side, dock, 0, ghost, ghost);
+    for (let slot = 0; slot < CROWD; slot++) crowdAt(slot, ghost);
+    for (let lane = 0; lane < LANES; lane++) {
+      for (let stop = 0; stop < ARC_STOPS; stop++) jumperAt(lane, stop, ghost);
+      for (let frame = 0; frame < SPLASH_FRAMES.length; frame++) splashAt(lane, frame, ghost);
     }
+    for (const dock of SHARK_DOCKS) {
+      sharkAt(dock, true, ghost);
+      sharkAt(dock, false, ghost);
+    }
+    for (let dock = 0; dock < DOCKS; dock++) boatAt(dock, 0, ghost, ghost);
   }
 
   /* -- painted background ------------------------------------------------ */
@@ -367,12 +390,12 @@ export function createRescueRenderer(canvas) {
     paint(SMOKE_SMALL, half(GRID_WIDTH) - 40, SKY_ROW + 8, dim);
     paint(SMOKE_SMALL, half(GRID_WIDTH) + 34, SKY_ROW + 7, dim);
 
-    // Superstructure, mirrored so the ship reads the same from either side.
-    for (let side = 0; side < SIDES; side++) {
-      paintSide(side, BRIDGE, 24, SUPER_ROW, ink);
-      paintSide(side, FUNNEL, 84, SUPER_ROW + 1, ink);
-      paintSide(side, COWL, 66, SUPER_ROW + 10, ink);
-      paintSide(side, LIFEBOAT, 102, SUPER_ROW + 13, ink);
+    // Superstructure, mirrored so the ship reads the same from either end.
+    for (let shipHalf = 0; shipHalf < 2; shipHalf++) {
+      paintShipSide(shipHalf, BRIDGE, 24, SUPER_ROW, ink);
+      paintShipSide(shipHalf, FUNNEL, 84, SUPER_ROW + 1, ink);
+      paintShipSide(shipHalf, COWL, 66, SUPER_ROW + 10, ink);
+      paintShipSide(shipHalf, LIFEBOAT, 102, SUPER_ROW + 13, ink);
     }
 
     // The fire amidships. Two frames cut hard on a simulated-step counter --
@@ -410,24 +433,27 @@ export function createRescueRenderer(canvas) {
     lcd.fillArea(SHIP_LEFT + 2, SHIP_HULL_ROW + 15, SHIP_W - 4, 2, lcd.colors.ground);
   }
 
-  /** The landing at each outer edge: cliff, palm, boathouse, jetty, sand. */
+  /**
+   * The landing: headland, palm, boathouse, jetty, sand -- all at the near
+   * end, and all of it above or below the band the boat works in.
+   *
+   * There is one of these now where there used to be two, and that asymmetry
+   * is the game: the water runs out one way and there is land the other.
+   */
   function drawShore() {
     const ink = lcd.colors.ink;
     const dim = lcd.colors.dim;
-    for (let side = 0; side < SIDES; side++) {
-      paintSide(side, PALM, 2, PALM_ROW, ink);
-      paintSide(side, BOATHOUSE, 22, BOATHOUSE_ROW, ink);
-      paintSide(side, JETTY, 0, JETTY_ROW, ink);
-      // The land itself: a strip outboard of the outermost dock, and the
-      // sand the jetty stands on. Both are kept clear of every cell a boat,
-      // a shark or a splash can use -- which is what SHARK_OUTER_DOCK bought.
-      const cliff = side === 0 ? 0 : GRID_WIDTH - CLIFF_W;
-      lcd.fillArea(cliff, PALM_ROW + 24, CLIFF_W, GRID_HEIGHT - PALM_ROW - 24, ink);
-      const beach = side === 0 ? 0 : GRID_WIDTH - BEACH_W;
-      lcd.fillArea(beach, BEACH_ROW, BEACH_W, 3, ink);
-      for (let row = BEACH_ROW + 5; row < GRID_HEIGHT; row += 6) {
-        lcd.fillArea(beach + (side === 0 ? 0 : 6), row, BEACH_W - 6, 2, dim);
-      }
+
+    paint(PALM, PALM_COL, PALM_ROW, ink);
+    paint(BOATHOUSE, BOATHOUSE_COL, BOATHOUSE_ROW, ink);
+    paint(JETTY, JETTY_COL, JETTY_ROW, ink);
+
+    // The headland itself, and the sand the jetty stands on. Both are kept
+    // clear of every cell a boat, a shark or a splash can use.
+    lcd.fillArea(0, CLIFF_ROW, CLIFF_W, GRID_HEIGHT - CLIFF_ROW, ink);
+    lcd.fillArea(0, BEACH_ROW, BEACH_W, 3, ink);
+    for (let row = BEACH_ROW + 5; row < GRID_HEIGHT; row += 6) {
+      lcd.fillArea(0, row, BEACH_W - 6, 2, dim);
     }
   }
 
@@ -447,15 +473,27 @@ export function createRescueRenderer(canvas) {
    */
   function drawWater(state) {
     const phase = Math.floor(state.step / 24) % 2;
-    const left = BEACH_W;
-    const right = GRID_WIDTH - BEACH_W;
     for (let row = WATERLINE_ROW + 4; row < GRID_HEIGHT; row += 8) {
       if (reservedRow(row) || reservedRow(row + 1)) continue;
-      for (let col = left + ((phase + half(row)) % 16); col < right; col += 16) {
+      for (let col = BEACH_W + ((phase + half(row)) % 16); col < GRID_WIDTH; col += 16) {
         lcd.fillArea(col, row, 8, 2, row % 16 === 0 ? lcd.colors.ink : lcd.colors.dim);
       }
     }
-    lcd.fillArea(left, WATERLINE_ROW, right - left, 2, lcd.colors.ink);
+    lcd.fillArea(BEACH_W, WATERLINE_ROW, GRID_WIDTH - BEACH_W, 2, lcd.colors.ink);
+
+    // The near water, between the landing and the nearest lane. Faint, and
+    // kept well clear of the columns the arcs sweep.
+    for (let row = NEAR_WATER_TOP; row < NEAR_WATER_BOTTOM; row += 10) {
+      for (let col = BEACH_W + ((phase * 8 + row) % 18); col < NEAR_WATER_RIGHT; col += 18) {
+        lcd.fillArea(col, row, 9, 2, lcd.colors.dim);
+      }
+    }
+    // Solid, not faint: it is an object out there, not more texture.
+    paint(ISLAND, ISLAND_COL, ISLAND_ROW, lcd.colors.ink);
+
+    // The channel marker, past the far dock: the seaward end of the water,
+    // and the only thing out there that is not weather.
+    paint(BUOY, BUOY_COL, BUOY_ROW, lcd.colors.ink);
   }
 
   /* -- readout ----------------------------------------------------------- */
@@ -496,29 +534,27 @@ export function createRescueRenderer(canvas) {
     resize: lcd.resize,
 
     /**
-     * Turn a touch into an order: which boat, and which dock to send it to.
+     * Turn a touch into an order: the dock to send the boat to.
      *
-     * This is the whole control scheme in one function. The half of the panel
-     * you touch picks the boat -- no mode, no selection, nothing to remember
-     * -- and the column you touch picks the dock, so a tap is a complete
-     * instruction rather than the start of a hold. Holding and sliding still
-     * works, because a held pointer re-issues the order every step.
+     * This is the whole control scheme in one function. The column you touch
+     * picks the dock, so a tap is a complete instruction rather than the
+     * start of a hold, and the boat runs the errand after you lift. Holding
+     * and sliding still works, because a held pointer re-issues the order
+     * every step.
      *
      * Nearest dock rather than a band, so there is no dead space between
      * berths: every point on the panel means something.
      *
      * @param {number} clientX Viewport X from a pointer event.
-     * @returns {{side: number, dock: number}}
+     * @returns {number} Dock index.
      */
     orderAt(clientX) {
       const col = lcd.columnAt(clientX);
-      const side = col < half(GRID_WIDTH) ? 0 : 1;
-      const centres = DOCK_CENTRE[side];
       let best = 0;
-      for (let dock = 1; dock < centres.length; dock++) {
-        if (Math.abs(centres[dock] - col) < Math.abs(centres[best] - col)) best = dock;
+      for (let dock = 1; dock < DOCK_CENTRE.length; dock++) {
+        if (Math.abs(DOCK_CENTRE[dock] - col) < Math.abs(DOCK_CENTRE[best] - col)) best = dock;
       }
-      return { side, dock: best };
+      return best;
     },
 
     /**
@@ -540,30 +576,20 @@ export function createRescueRenderer(canvas) {
       // Who is still on deck. Drawn from the crowd's own count rather than
       // from a list of figures: the manifest is a number in the simulation,
       // and the panel is the place it becomes ninety-two people.
-      for (let side = 0; side < SIDES; side++) {
-        const waiting = state.boats[side].waiting;
-        const gone = CROWD_PER_SIDE - waiting;
-        for (let slot = gone; slot < CROWD_PER_SIDE; slot++) crowdAt(side, slot, ink);
-      }
+      for (let slot = CROWD - state.waiting; slot < CROWD; slot++) crowdAt(slot, ink);
 
-      for (const shark of state.sharks) {
-        // On the left, a rising dock index runs inboard, so dir +1 is a shark
-        // swimming to the right; on the right it is reflected.
-        const facingLeft = shark.side === 0 ? shark.dir < 0 : shark.dir > 0;
-        sharkAt(shark.side, shark.pos, facingLeft, ink);
-      }
+      // A rising dock index runs seaward, so dir -1 is a shark swimming
+      // toward the shore.
+      for (const shark of state.sharks) sharkAt(shark.pos, shark.dir < 0, ink);
 
-      for (let side = 0; side < SIDES; side++) {
-        const boat = state.boats[side];
-        boatAt(side, boat.dock, boat.aboard, ink, ghost);
-      }
+      boatAt(state.boat.dock, state.boat.aboard, ink, ghost);
 
       for (const j of state.jumpers) {
-        if (j.stop < ARC_STOPS) jumperAt(j.side, j.lane, j.stop, ink);
+        if (j.stop < ARC_STOPS) jumperAt(j.lane, j.stop, ink);
       }
 
       for (const splash of state.splashes) {
-        splashAt(splash.side, splash.lane, splashFrame(splash), ink);
+        splashAt(splash.lane, splashFrame(splash), ink);
       }
 
       if (view.badge) {

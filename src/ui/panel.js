@@ -42,18 +42,6 @@ export function createPanel() {
     return button;
   }
 
-  /**
-   * The control-scheme toggle, on both pre-run screens.
-   *
-   * A button rather than a settings screen, and on the screen you are already
-   * looking at before a run, because the two schemes are meant to be compared
-   * by feel -- which means switching has to be one press, not a trip.
-   */
-  function addControlButton(control) {
-    if (!control || !control.onToggle) return;
-    addButton(`CONTROL · ${control.label}`, control.onToggle, { variant: 'quiet', id: 'btn-control' });
-  }
-
   function reset() {
     clear(stats);
     clear(actions);
@@ -69,7 +57,7 @@ export function createPanel() {
     },
 
     /** Pre-run screen for a day that has not been played. */
-    showStart({ puzzle, date, streak, control, onPlay, onPractice }) {
+    showStart({ puzzle, date, streak, onPlay, onPractice }) {
       reset();
       eyebrow.textContent = `PUZZLE #${displayPuzzleNumber(puzzle)} · ${date}`;
       title.textContent = 'HANDHELD DAILY';
@@ -78,7 +66,6 @@ export function createPanel() {
       note.hidden = false;
       addButton('PLAY', onPlay, { variant: 'primary' });
       addButton('PRACTICE', onPractice);
-      addControlButton(control);
       root.hidden = false;
     },
 
@@ -119,7 +106,7 @@ export function createPanel() {
       root.hidden = false;
     },
 
-    showPracticeStart({ control, onPlay, onExit }) {
+    showPracticeStart({ onPlay, onExit }) {
       reset();
       eyebrow.textContent = 'PRACTICE';
       title.textContent = 'FREE PLAY';
@@ -127,7 +114,6 @@ export function createPanel() {
       note.hidden = false;
       addButton('START', onPlay, { variant: 'primary' });
       addButton('BACK TO DAILY', onExit);
-      addControlButton(control);
       root.hidden = false;
     },
 

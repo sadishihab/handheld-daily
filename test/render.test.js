@@ -11,11 +11,13 @@
 import { createRescueRenderer, GRID_WIDTH, GRID_HEIGHT, LAYOUT } from '../src/render/rescue.js';
 import {
   createRescueGame,
-  SIDES,
-  DOCKS_PER_SIDE,
-  LANES_PER_SIDE,
+  DOCKS,
+  SHORE_DOCK,
+  FAR_DOCK,
+  LANE_DOCK,
+  LANES,
   ARC_STOPS,
-  CROWD_PER_SIDE,
+  CROWD,
   CAPACITY,
   RUN_STEPS,
   SHARK_DOCKS,
@@ -108,19 +110,19 @@ function patternCells(pattern, col, row) {
 
 /* -- every cell each kind of entity can ever light ---------------------- */
 
-const crowdCells = (side, slot) => {
-  const { col, row } = LAYOUT.crowdSlot(side, slot);
+const crowdCells = (slot) => {
+  const { col, row } = LAYOUT.crowdSlot(slot);
   return patternCells(DECK_PASSENGER, col, row);
 };
-const jumperCells = (side, lane, stop) =>
-  patternCells(LAYOUT.jumperPose(stop), LAYOUT.jumperCol(side, lane, stop), LAYOUT.STOP_ROW[stop]);
-const splashCells = (side, lane, frame) =>
-  patternCells(SPLASH_FRAMES[frame], LAYOUT.splashCol(side, lane), LAYOUT.SPLASH_ROW);
-const sharkCells = (side, dock, facingLeft) =>
-  patternCells(facingLeft ? SHARK : flip(SHARK), LAYOUT.sharkCol(side, dock), LAYOUT.SHARK_ROW);
+const jumperCells = (lane, stop) =>
+  patternCells(LAYOUT.jumperPose(stop), LAYOUT.jumperCol(lane, stop), LAYOUT.STOP_ROW[stop]);
+const splashCells = (lane, frame) =>
+  patternCells(SPLASH_FRAMES[frame], LAYOUT.splashCol(lane), LAYOUT.SPLASH_ROW);
+const sharkCells = (dock, facingShore) =>
+  patternCells(facingShore ? SHARK : flip(SHARK), LAYOUT.sharkCol(dock), LAYOUT.SHARK_ROW);
 
-function boatCells(side, dock, slots = CAPACITY) {
-  const left = LAYOUT.hullCol(side, dock);
+function boatCells(dock, slots = CAPACITY) {
+  const left = LAYOUT.hullCol(dock);
   const cells = patternCells(HULL, left, LAYOUT.HULL_ROW);
   for (let slot = 0; slot < slots; slot++) {
     cells.push(
@@ -134,18 +136,16 @@ function boatCells(side, dock, slots = CAPACITY) {
 function allEntityCells() {
   const cells = new Set();
   const add = (list) => list.forEach((c) => cells.add(c));
-  for (let side = 0; side < SIDES; side++) {
-    for (let slot = 0; slot < CROWD_PER_SIDE; slot++) add(crowdCells(side, slot));
-    for (let lane = 0; lane < LANES_PER_SIDE; lane++) {
-      for (let stop = 0; stop < ARC_STOPS; stop++) add(jumperCells(side, lane, stop));
-      for (let frame = 0; frame < SPLASH_FRAMES.length; frame++) add(splashCells(side, lane, frame));
-    }
-    for (const dock of SHARK_DOCKS) {
-      add(sharkCells(side, dock, true));
-      add(sharkCells(side, dock, false));
-    }
-    for (let dock = 0; dock < DOCKS_PER_SIDE; dock++) add(boatCells(side, dock));
+  for (let slot = 0; slot < CROWD; slot++) add(crowdCells(slot));
+  for (let lane = 0; lane < LANES; lane++) {
+    for (let stop = 0; stop < ARC_STOPS; stop++) add(jumperCells(lane, stop));
+    for (let frame = 0; frame < SPLASH_FRAMES.length; frame++) add(splashCells(lane, frame));
   }
+  for (const dock of SHARK_DOCKS) {
+    add(sharkCells(dock, true));
+    add(sharkCells(dock, false));
+  }
+  for (let dock = 0; dock < DOCKS; dock++) add(boatCells(dock));
   return cells;
 }
 
@@ -153,20 +153,15 @@ function allEntityCells() {
 function litCells(state) {
   const cells = new Set();
   const add = (list) => list.forEach((c) => cells.add(c));
-  for (let side = 0; side < SIDES; side++) {
-    const boat = state.boats[side];
-    add(boatCells(side, boat.dock));
-    for (let slot = CROWD_PER_SIDE - boat.waiting; slot < CROWD_PER_SIDE; slot++) {
-      add(crowdCells(side, slot));
-    }
-  }
-  for (const j of state.jumpers) if (j.stop < ARC_STOPS) add(jumperCells(j.side, j.lane, j.stop));
+  add(boatCells(state.boat.dock));
+  for (let slot = CROWD - state.waiting; slot < CROWD; slot++) add(crowdCells(slot));
+  for (const j of state.jumpers) if (j.stop < ARC_STOPS) add(jumperCells(j.lane, j.stop));
   for (const s of state.sharks) {
-    add(sharkCells(s.side, s.pos, true));
-    add(sharkCells(s.side, s.pos, false));
+    add(sharkCells(s.pos, true));
+    add(sharkCells(s.pos, false));
   }
   for (const s of state.splashes) {
-    for (let f = 0; f < SPLASH_FRAMES.length; f++) add(splashCells(s.side, s.lane, f));
+    for (let f = 0; f < SPLASH_FRAMES.length; f++) add(splashCells(s.lane, f));
   }
   return cells;
 }
@@ -179,32 +174,38 @@ check('the backing store matches the grid',
   harness.canvas.width === GRID_WIDTH * SCALE && harness.canvas.height === GRID_HEIGHT * SCALE,
   `${harness.canvas.width}x${harness.canvas.height}`);
 
-/* -- the readability the finer grid was bought for ---------------------- */
+/* -- the readability the board was rebuilt for -------------------------- */
 //
-// This is the constraint that decided GRID_WIDTH, so it is asserted rather
-// than left to the eye. Four passengers in a hull have to read as four
-// people; at the old grid they shared edges and read as one bar.
+// Twelve moorings became five, and the room that bought went into the boat.
+// This is the constraint that has been sacrificed on every previous board, so
+// it is asserted rather than left to the eye: four passengers in a hull have
+// to read as four people.
 {
   const passW = patternSize(PASSENGER).width;
+  const passH = patternSize(PASSENGER).height;
   const hullW = patternSize(HULL).width;
   const gap = LAYOUT.SLOT_PITCH - passW;
   const rightmost = LAYOUT.SLOT_INSET + (CAPACITY - 1) * LAYOUT.SLOT_PITCH + passW;
-  check('a passenger is at least three cells wide', passW >= 3, `${passW} cells`);
-  check('passenger slots leave a clear column between them', gap >= 1, `gap ${gap}`);
+  check('a passenger in the boat is at least five cells wide', passW >= 5, `${passW} cells`);
+  check('a passenger in the boat is tall enough to have limbs', passH >= 7, `${passH} cells`);
+  check('passenger slots leave at least two clear columns between them', gap >= 2, `gap ${gap}`);
   check('every passenger slot sits on the hull',
     LAYOUT.SLOT_INSET >= 0 && rightmost <= hullW, `slots span 0..${rightmost} of ${hullW}`);
 
   // And the docks have to stay apart, or the ghost row is one long bar
   // rather than a line of moorings.
-  const pitch = LAYOUT.DOCK_CENTRE[0][1] - LAYOUT.DOCK_CENTRE[0][0];
-  check('neighbouring docks are separated by clear water', pitch - hullW >= 3,
+  const pitch = LAYOUT.DOCK_CENTRE[1] - LAYOUT.DOCK_CENTRE[0];
+  check('neighbouring docks are separated by clear water', pitch - hullW >= 8,
     `${pitch - hullW} clear cells between hulls`);
 
-  // The two innermost hulls, one per side, must not run into each other.
-  const innerLeft = LAYOUT.hullCol(0, DOCKS_PER_SIDE - 1) + hullW - 1;
-  const innerRight = LAYOUT.hullCol(1, DOCKS_PER_SIDE - 1);
-  check('the two innermost docks do not overlap at the centre line',
-    innerLeft < innerRight, `left ends at ${innerLeft}, right starts at ${innerRight}`);
+  const evenlySpaced = LAYOUT.DOCK_CENTRE.every(
+    (centre, i) => i === 0 || centre - LAYOUT.DOCK_CENTRE[i - 1] === pitch
+  );
+  check('the docks are evenly spaced', evenlySpaced, LAYOUT.DOCK_CENTRE.join(', '));
+
+  const first = LAYOUT.hullCol(0);
+  const last = LAYOUT.hullCol(DOCKS - 1) + hullW - 1;
+  check('every dock is fully on the panel', first >= 0 && last < GRID_WIDTH, `${first}..${last}`);
 
   // The same rule the hull lives under applies to anything else that stands
   // on a dock. A shark wider than the pitch made the ghost row read as one
@@ -215,45 +216,77 @@ check('the backing store matches the grid',
     sharkW <= hullW, `shark ${sharkW}, hull ${hullW}`);
 
   const merged = [];
-  for (let side = 0; side < SIDES; side++) {
-    for (let i = 1; i < SHARK_DOCKS.length; i++) {
-      const near = new Set([
-        ...sharkCells(side, SHARK_DOCKS[i - 1], true),
-        ...sharkCells(side, SHARK_DOCKS[i - 1], false),
-      ]);
-      const far = [
-        ...sharkCells(side, SHARK_DOCKS[i], true),
-        ...sharkCells(side, SHARK_DOCKS[i], false),
-      ];
-      if (far.some((cell) => near.has(cell))) merged.push(`${side}:${SHARK_DOCKS[i - 1]}-${SHARK_DOCKS[i]}`);
-    }
+  for (let i = 1; i < SHARK_DOCKS.length; i++) {
+    const near = new Set([
+      ...sharkCells(SHARK_DOCKS[i - 1], true),
+      ...sharkCells(SHARK_DOCKS[i - 1], false),
+    ]);
+    const far = [...sharkCells(SHARK_DOCKS[i], true), ...sharkCells(SHARK_DOCKS[i], false)];
+    if (far.some((cell) => near.has(cell))) merged.push(`${SHARK_DOCKS[i - 1]}-${SHARK_DOCKS[i]}`);
   }
   check('neighbouring shark positions stay separate fish', merged.length === 0, merged.join(', '));
 }
 
-/* -- the board is symmetrical about the ship ---------------------------- */
+/* -- the board runs from a shore at one end to open water at the other --- */
+{
+  const ordered = LAYOUT.DOCK_CENTRE.every((c, i) => i === 0 || c > LAYOUT.DOCK_CENTRE[i - 1]);
+  check('dock index runs seawards across the panel', ordered, LAYOUT.DOCK_CENTRE.join(', '));
+  check('the shore is the nearest dock to one edge',
+    LAYOUT.DOCK_CENTRE[SHORE_DOCK] < GRID_WIDTH / 4,
+    `shore at column ${LAYOUT.DOCK_CENTRE[SHORE_DOCK]}`);
+  check('every lane is out of reach of the shore in one move',
+    LANE_DOCK.every((dock) => dock - SHORE_DOCK >= 2), LANE_DOCK.join(', '));
+
+  // Two lanes is what makes the ferry cost anything, and the price is that
+  // only two columns would have anyone falling down them. The arc pays it
+  // back by sweeping sideways, so this is asserted rather than eyeballed.
+  const pitch = LAYOUT.DOCK_CENTRE[1] - LAYOUT.DOCK_CENTRE[0];
+  const swing = LAYOUT.ARC_OFFSET[0] - LAYOUT.ARC_OFFSET[ARC_STOPS - 1];
+  check('a jump arc swings sideways by most of a dock pitch',
+    swing >= pitch * 0.6, `${swing} cells against a ${pitch}-cell pitch`);
+
+  const columns = new Set();
+  for (let lane = 0; lane < LANES; lane++) {
+    for (let stop = 0; stop < ARC_STOPS; stop++) {
+      for (const cell of jumperCells(lane, stop)) columns.add(Number(cell.split(',')[0]));
+    }
+  }
+  check('the arcs cover a band wider than the lanes they land in',
+    Math.max(...columns) - Math.min(...columns) + 1 > pitch * (LANES - 1) + 20,
+    `arcs span ${Math.max(...columns) - Math.min(...columns) + 1} columns`);
+
+  // The last stops must be over the landing dock: the segment the player is
+  // reading has to be the segment the catch rule is using.
+  const offCentre = [];
+  for (let lane = 0; lane < LANES; lane++) {
+    for (const stop of [ARC_STOPS - 2, ARC_STOPS - 1]) {
+      const jumperMid = LAYOUT.jumperCol(lane, stop) + Math.floor(patternSize(LAYOUT.jumperPose(stop)).width / 2);
+      if (jumperMid !== LAYOUT.DOCK_CENTRE[LANE_DOCK[lane]]) offCentre.push(`${lane}/${stop}`);
+    }
+  }
+  check('a jumper is over its own dock for every catchable stop',
+    offCentre.length === 0, offCentre.join(', '));
+}
+
+/* -- the ship is still symmetrical about the fire ----------------------- */
 {
   const mismatches = [];
-  for (let dock = 0; dock < DOCKS_PER_SIDE; dock++) {
-    const mirrored = LAYOUT.mirrorCentre(LAYOUT.DOCK_CENTRE[0][dock]);
-    if (mirrored !== LAYOUT.DOCK_CENTRE[1][dock]) mismatches.push(`dock ${dock}`);
-  }
-  for (let slot = 0; slot < CROWD_PER_SIDE; slot++) {
-    const left = LAYOUT.crowdSlot(0, slot);
-    const right = LAYOUT.crowdSlot(1, slot);
-    const width = patternSize(DECK_PASSENGER).width;
+  const width = patternSize(DECK_PASSENGER).width;
+  for (let slot = 0; slot < CROWD; slot += 2) {
+    const left = LAYOUT.crowdSlot(slot);
+    const right = LAYOUT.crowdSlot(slot + 1);
     if (LAYOUT.mirrorCol(left.col, width) !== right.col || left.row !== right.row) {
       mismatches.push(`crowd ${slot}`);
     }
   }
-  check('the right-hand half is the left-hand half reflected',
+  check('the crowd on deck is a mirror image of itself about the fire',
     mismatches.length === 0, mismatches.slice(0, 4).join(', '));
 }
 
 /* -- everything snaps to the cell grid ---------------------------------- */
 {
   const game = createRescueGame({ seed: 12345 });
-  for (let i = 0; i < 900; i++) game.update({ left: 0, right: 5 });
+  for (let i = 0; i < 900; i++) game.update(i % 60 === 0 ? 0 : null);
   const { rects } = harness.draw(game.state, {});
   const fractional = rects.filter((r) => ![r.x, r.y, r.w, r.h].every(Number.isInteger));
   check('every drawn rectangle lands on whole pixels', fractional.length === 0,
@@ -275,24 +308,38 @@ check('the backing store matches the grid',
     for (const cell of cells) if (!ghost.has(cell) && !lit.has(cell)) missing.push(`${label} ${cell}`);
   };
 
-  for (let side = 0; side < SIDES; side++) {
-    for (let lane = 0; lane < LANES_PER_SIDE; lane++) {
-      for (let stop = 0; stop < ARC_STOPS; stop++) want(`jumper ${side}/${lane}/${stop}`, jumperCells(side, lane, stop));
-      for (let f = 0; f < SPLASH_FRAMES.length; f++) want(`splash ${side}/${lane}/${f}`, splashCells(side, lane, f));
-    }
-    for (const dock of SHARK_DOCKS) {
-      want(`shark ${side}/${dock}/L`, sharkCells(side, dock, true));
-      want(`shark ${side}/${dock}/R`, sharkCells(side, dock, false));
-    }
-    for (let dock = 0; dock < DOCKS_PER_SIDE; dock++) want(`dock ${side}/${dock}`, boatCells(side, dock));
+  for (let lane = 0; lane < LANES; lane++) {
+    for (let stop = 0; stop < ARC_STOPS; stop++) want(`jumper ${lane}/${stop}`, jumperCells(lane, stop));
+    for (let f = 0; f < SPLASH_FRAMES.length; f++) want(`splash ${lane}/${f}`, splashCells(lane, f));
   }
+  for (const dock of SHARK_DOCKS) {
+    want(`shark ${dock}/in`, sharkCells(dock, true));
+    want(`shark ${dock}/out`, sharkCells(dock, false));
+  }
+  for (let dock = 0; dock < DOCKS; dock++) want(`dock ${dock}`, boatCells(dock));
+
   check(
-    `all ${SIDES * LANES_PER_SIDE * ARC_STOPS} jumper, ` +
-      `${SIDES * LANES_PER_SIDE * SPLASH_FRAMES.length} splash, ` +
-      `${SIDES * SHARK_DOCKS.length * 2} shark and ${SIDES * DOCKS_PER_SIDE} dock positions are ghosted`,
+    `all ${LANES * ARC_STOPS} jumper, ${LANES * SPLASH_FRAMES.length} splash, ` +
+      `${SHARK_DOCKS.length * 2} shark and ${DOCKS} dock positions are ghosted`,
     missing.length === 0,
     `${missing.length} missing, e.g. ${missing.slice(0, 3).join(', ')}`
   );
+
+  // Every seat in every berth, not just the hulls: an empty seat has to be
+  // visible or the player cannot see how much room is left from across the
+  // panel, which is the whole gamble the full-boat bonus is built on.
+  const seats = [];
+  for (let dock = 0; dock < DOCKS; dock++) {
+    const left = LAYOUT.hullCol(dock);
+    for (let slot = 0; slot < CAPACITY; slot++) {
+      const col = left + LAYOUT.SLOT_INSET + slot * LAYOUT.SLOT_PITCH;
+      for (const cell of patternCells(PASSENGER, col, LAYOUT.SLOT_ROW)) {
+        if (!ghost.has(cell) && !lit.has(cell)) seats.push(`${dock}/${slot}`);
+      }
+    }
+  }
+  check(`all ${DOCKS * CAPACITY} seats in the boat are ghosted`, seats.length === 0,
+    seats.slice(0, 3).join(', '));
 }
 
 /* -- the crowd: ghosted when empty, lit when waiting, extinguishing as
@@ -300,41 +347,37 @@ check('the backing store matches the grid',
       whole reason it reads as populated, so all three states are asserted. */
 {
   const empty = createRescueGame({ seed: 7 });
-  for (const boat of empty.state.boats) boat.waiting = 0;
+  empty.state.waiting = 0;
   const ghosted = cellsOf(harness.draw(empty.state, {}).rects, GHOST);
 
   const unghosted = [];
-  for (let side = 0; side < SIDES; side++) {
-    for (let slot = 0; slot < CROWD_PER_SIDE; slot++) {
-      for (const cell of crowdCells(side, slot)) if (!ghosted.has(cell)) unghosted.push(`${side}/${slot}`);
-    }
+  for (let slot = 0; slot < CROWD; slot++) {
+    for (const cell of crowdCells(slot)) if (!ghosted.has(cell)) unghosted.push(`${slot}`);
   }
-  check(`all ${SIDES * CROWD_PER_SIDE} deck positions stay ghosted once empty`,
+  check(`all ${CROWD} deck positions stay ghosted once empty`,
     unghosted.length === 0, `${unghosted.length} cells, e.g. ${unghosted.slice(0, 3).join(', ')}`);
 
   const full = createRescueGame({ seed: 7 });
   const fullInk = cellsOf(harness.draw(full.state, {}).rects, INK);
   const unlit = [];
-  for (let side = 0; side < SIDES; side++) {
-    for (let slot = 0; slot < CROWD_PER_SIDE; slot++) {
-      for (const cell of crowdCells(side, slot)) if (!fullInk.has(cell)) unlit.push(`${side}/${slot}`);
-    }
+  for (let slot = 0; slot < CROWD; slot++) {
+    for (const cell of crowdCells(slot)) if (!fullInk.has(cell)) unlit.push(`${slot}`);
   }
   check('a full deck lights every one of them', unlit.length === 0,
     `${unlit.length} cells, e.g. ${unlit.slice(0, 3).join(', ')}`);
 
   // Extinguishing: each passenger who jumps puts out exactly one figure, and
   // it is the innermost one still standing -- the crowd thins from the fire
-  // outward, which is the direction jumpers come from.
+  // outward, which is where jumpers come from.
   const counts = [];
   let orderHolds = true;
-  for (const gone of [0, 1, 2, 10, CROWD_PER_SIDE]) {
+  for (const gone of [0, 1, 2, 10, CROWD]) {
     const s = createRescueGame({ seed: 7 });
-    for (const boat of s.state.boats) boat.waiting = CROWD_PER_SIDE - gone;
+    s.state.waiting = CROWD - gone;
     const ink = cellsOf(harness.draw(s.state, {}).rects, INK);
     let litSlots = 0;
-    for (let slot = 0; slot < CROWD_PER_SIDE; slot++) {
-      const isLit = crowdCells(0, slot).every((c) => ink.has(c));
+    for (let slot = 0; slot < CROWD; slot++) {
+      const isLit = crowdCells(slot).every((c) => ink.has(c));
       if (isLit) litSlots += 1;
       // Slots below `gone` have jumped; every slot at or above it is still there.
       if (isLit !== slot >= gone) orderHolds = false;
@@ -342,7 +385,7 @@ check('the backing store matches the grid',
     counts.push(litSlots);
   }
   check('the crowd extinguishes one figure per passenger who jumps',
-    counts.join(',') === [CROWD_PER_SIDE, CROWD_PER_SIDE - 1, CROWD_PER_SIDE - 2, CROWD_PER_SIDE - 10, 0].join(','),
+    counts.join(',') === [CROWD, CROWD - 1, CROWD - 2, CROWD - 10, 0].join(','),
     `lit counts ${counts.join(', ')}`);
   check('it extinguishes from the middle of the ship outward', orderHolds);
 }
@@ -350,22 +393,18 @@ check('the backing store matches the grid',
 /* -- lit entities land exactly on their segments ------------------------ */
 {
   const game = createRescueGame({ seed: 12345 });
-  // Chase whatever is falling, on both sides, until someone is aboard.
-  for (let i = 0; i < 3000 && game.state.boats.every((b) => b.aboard === 0); i++) {
-    const order = { left: null, right: null };
-    for (const j of game.state.jumpers) {
-      order[j.side === 0 ? 'left' : 'right'] = [3, 4, 5][j.lane];
-    }
+  // Chase whatever is falling until someone is aboard.
+  for (let i = 0; i < 3000 && game.state.boat.aboard === 0; i++) {
+    let order = null;
+    for (const j of game.state.jumpers) order = LANE_DOCK[j.lane];
     game.update(order);
   }
   const { rects } = harness.draw(game.state, {});
   const ink = cellsOf(rects, INK);
+  const boat = game.state.boat;
+  check('the boat is carrying someone', boat.aboard > 0, `aboard ${boat.aboard}`);
 
-  const side = game.state.boats[0].aboard > 0 ? 0 : 1;
-  const boat = game.state.boats[side];
-  check('a boat is carrying someone', boat.aboard > 0, `aboard ${game.state.boats.map((b) => b.aboard)}`);
-
-  const left = LAYOUT.hullCol(side, boat.dock);
+  const left = LAYOUT.hullCol(boat.dock);
   check('the hull is lit at its dock',
     patternCells(HULL, left, LAYOUT.HULL_ROW).every((c) => ink.has(c)));
 
@@ -376,8 +415,8 @@ check('the backing store matches the grid',
     boat.aboard === CAPACITY ||
       !patternCells(PASSENGER, slotCol(CAPACITY - 1), LAYOUT.SLOT_ROW).every((c) => ink.has(c)));
 
-  check('every jumper is lit at its (side, lane, stop)',
-    game.state.jumpers.every((j) => jumperCells(j.side, j.lane, j.stop).every((c) => ink.has(c))));
+  check('every jumper is lit at its (lane, stop)',
+    game.state.jumpers.every((j) => jumperCells(j.lane, j.stop).every((c) => ink.has(c))));
 }
 
 /* -- the flail and splash actually advances through its frames ---------- */
@@ -386,11 +425,10 @@ check('the backing store matches the grid',
   const seen = new Set();
   for (let frame = 0; frame < SPLASH_FRAMES.length; frame++) {
     const s = createRescueGame({ seed: 3 });
-    s.state.splashes = [{ side: 0, lane: 1, age: frame * SPLASH_FRAME_STEPS }];
+    s.state.splashes = [{ lane: 1, age: frame * SPLASH_FRAME_STEPS }];
     const ink = cellsOf(harness.draw(s.state, {}).rects, INK);
     const shown = SPLASH_FRAMES.findIndex((_, i) =>
-      splashCells(0, 1, i).every((c) => ink.has(c)) &&
-      splashCells(0, 1, i).length > 0);
+      splashCells(1, i).every((c) => ink.has(c)) && splashCells(1, i).length > 0);
     seen.add(shown);
   }
   check(`the splash steps through all ${SPLASH_FRAMES.length} frames as it ages`,
@@ -400,7 +438,7 @@ check('the backing store matches the grid',
   // A miss has to be visible as an event, not just as a lamp lighting.
   const quiet = cellsOf(harness.draw(game.state, {}).rects, INK).size;
   const splashing = createRescueGame({ seed: 3 });
-  splashing.state.splashes = [{ side: 0, lane: 1, age: 2 * SPLASH_FRAME_STEPS }];
+  splashing.state.splashes = [{ lane: 1, age: 2 * SPLASH_FRAME_STEPS }];
   const loud = cellsOf(harness.draw(splashing.state, {}).rects, INK).size;
   check('a splash lights cells that nothing else was lighting', loud > quiet, `${quiet} -> ${loud}`);
 }
@@ -408,21 +446,20 @@ check('the backing store matches the grid',
 /* -- painted art must never sit on a segment an entity can use ----------- */
 //
 // The strongest layout assertion in the suite. Every deck plank, funnel,
-// jetty, wave and flame is swept against every cell any entity could ever
-// stand on. A passenger drawn on the same cells as the deck under them is
-// invisible, and no other test can see it.
+// jetty, buoy, wave and flame is swept against every cell any entity could
+// ever stand on. A passenger drawn on the same cells as the deck under them
+// is invisible, and no other test can see it.
 {
   const entityCells = allEntityCells();
   const collisions = new Set();
 
-  // Sweep the water phase, the flame frame, and every dock the boats can be
+  // Sweep the water phase, the flame frame, and every dock the boat can be
   // at -- all three change which cells the painted layers touch.
   for (const step of [0, 9, 18, 24, 48, 72]) {
-    for (let dock = 0; dock < DOCKS_PER_SIDE; dock++) {
+    for (let dock = 0; dock < DOCKS; dock++) {
       const game = createRescueGame({ seed: 3 });
       game.state.step = step;
-      game.state.boats[0].dock = dock;
-      game.state.boats[1].dock = DOCKS_PER_SIDE - 1 - dock;
+      game.state.boat.dock = dock;
       const { rects } = harness.draw(game.state, {});
       const painted = cellsOf(rects, INK, DIM);
       const lit = litCells(game.state);
@@ -468,10 +505,9 @@ check('the backing store matches the grid',
     faint.length > 0 && Math.min(...faint.map(([col]) => col)) < 12,
     `leftmost lit column ${faint.length ? Math.min(...faint.map(([col]) => col)) : 'none'}`);
 
-  // Two boats roughly double a run's score -- the best measured runs land in
-  // the 800s and a strong player will pass a thousand. The readout has to
-  // hold what the game can actually produce, or the number silently stops
-  // counting partway through the best run someone ever has.
+  // A good run lands near 700 and a strong player will pass a thousand. The
+  // readout has to hold what the game can actually produce, or the number
+  // silently stops counting partway through the best run someone ever has.
   const thousand = createRescueGame({ seed: 1 });
   thousand.state.score = 1000;
   const nines = createRescueGame({ seed: 1 });
@@ -524,38 +560,41 @@ check('the backing store matches the grid',
 /* -- the control surface ------------------------------------------------ */
 //
 // orderAt is the entire control scheme, so what a touch means is asserted
-// rather than trusted: the half you touch has to pick the boat, and the
-// column has to pick the nearest dock.
+// rather than trusted: the column has to pick the nearest dock, and there
+// must be no dead space anywhere on the glass.
 {
   const cellPx = SCALE;
   const at = (col) => harness.renderer.orderAt(col * cellPx + cellPx / 2);
 
-  const wrongSide = [];
-  for (let col = 0; col < GRID_WIDTH; col++) {
-    const expected = col < GRID_WIDTH / 2 ? 0 : 1;
-    if (at(col).side !== expected) wrongSide.push(col);
-  }
-  check('the half of the panel you touch picks the boat', wrongSide.length === 0,
-    `${wrongSide.length} columns addressed the wrong boat`);
-
   const wrongDock = [];
-  for (let side = 0; side < SIDES; side++) {
-    for (let dock = 0; dock < DOCKS_PER_SIDE; dock++) {
-      const got = at(LAYOUT.DOCK_CENTRE[side][dock]);
-      if (got.side !== side || got.dock !== dock) wrongDock.push(`${side}/${dock} -> ${got.side}/${got.dock}`);
-    }
+  for (let dock = 0; dock < DOCKS; dock++) {
+    const got = at(LAYOUT.DOCK_CENTRE[dock]);
+    if (got !== dock) wrongDock.push(`${dock} -> ${got}`);
   }
-  check('touching a dock orders that dock', wrongDock.length === 0, wrongDock.slice(0, 3).join(', '));
+  check('touching a dock orders that dock', wrongDock.length === 0, wrongDock.join(', '));
+
+  const nearest = [];
+  for (let col = 0; col < GRID_WIDTH; col++) {
+    let want = 0;
+    for (let dock = 1; dock < DOCKS; dock++) {
+      if (Math.abs(LAYOUT.DOCK_CENTRE[dock] - col) < Math.abs(LAYOUT.DOCK_CENTRE[want] - col)) want = dock;
+    }
+    if (at(col) !== want) nearest.push(col);
+  }
+  check('every column on the panel orders its nearest dock', nearest.length === 0,
+    `${nearest.length} columns, e.g. ${nearest.slice(0, 3).join(', ')}`);
+
+  const orders = new Set();
+  for (let col = 0; col < GRID_WIDTH; col++) orders.add(at(col));
+  check('every dock is reachable by touch', orders.size === DOCKS, `${orders.size} of ${DOCKS}`);
 
   // A thumb at the very edge of the glass, outside the letterboxed board,
-  // still has to reach the outermost dock -- that is where the shore is, and
-  // it is exactly where a thumb sits when the panel is narrower than the
-  // phone.
-  const farLeft = harness.renderer.orderAt(-40);
-  const farRight = harness.renderer.orderAt(GRID_WIDTH * cellPx + 40);
-  check('a touch past the edge of the board still orders the shore',
-    farLeft.side === 0 && farLeft.dock === 0 && farRight.side === 1 && farRight.dock === 0,
-    `${JSON.stringify(farLeft)} / ${JSON.stringify(farRight)}`);
+  // still has to reach the end docks -- that is exactly where a thumb sits
+  // when the panel is narrower than the phone.
+  check('a touch past the near edge orders the shore',
+    harness.renderer.orderAt(-40) === SHORE_DOCK);
+  check('a touch past the far edge orders the far dock',
+    harness.renderer.orderAt(GRID_WIDTH * cellPx + 40) === FAR_DOCK);
 }
 
 /* -- ghost opacity stays in the intended band --------------------------- */
@@ -570,7 +609,7 @@ check('the backing store matches the grid',
 /* -- the renderer must not write to game state -------------------------- */
 {
   const game = createRescueGame({ seed: 12345 });
-  for (let i = 0; i < 600; i++) game.update({ left: 0, right: 2 });
+  for (let i = 0; i < 600; i++) game.update(i % 30 === 0 ? 2 : null);
   const before = JSON.stringify(game.state);
   harness.draw(game.state, { badge: 'PRACTICE' });
   check('draw does not mutate game state', JSON.stringify(game.state) === before);

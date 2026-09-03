@@ -16,17 +16,16 @@ import {
   createRescueGame,
   RUN_STEPS,
   MAX_MISSES,
-  SIDES,
-  DOCKS_PER_SIDE,
+  DOCKS,
   SHORE_DOCK,
-  INNER_DOCK,
+  FAR_DOCK,
   LANE_DOCK,
-  LANES_PER_SIDE,
+  LANES,
   MIN_LANE_DOCK,
   ARC_STOPS,
   SPLASH_STOP,
   CAPACITY,
-  CROWD_PER_SIDE,
+  CROWD,
   SHARK_DOCKS,
   SPLASH_STEPS,
   SPLASH_FRAME_COUNT,
@@ -233,53 +232,40 @@ check(
  * A blind order script, derived from its own seeded RNG so it is a fixed
  * sequence rather than a live reaction.
  *
- * Shaped like a thumb rather than like a controller: one side is addressed at
- * a time, and the order stands for a while before the next one. That is what
- * the real input produces, so it is what a replay has to be able to reproduce.
+ * Shaped like a thumb rather than like a controller: an order is given, and
+ * then nothing happens for a while before the next one. That is what the real
+ * input produces, so it is what a replay has to be able to reproduce.
  */
 function recordOrderScript(seed, steps) {
   const rng = createRng(seed);
   const script = new Array(steps);
-  let held = { left: null, right: null };
+  let held = null;
   let holdUntil = 0;
 
   for (let step = 0; step < steps; step++) {
     if (step >= holdUntil) {
-      const side = rng.nextIntExclusive(0, SIDES);
-      const dock = rng.nextIntExclusive(0, DOCKS_PER_SIDE);
-      held = { left: side === 0 ? dock : null, right: side === 1 ? dock : null };
+      held = rng.nextIntExclusive(0, DOCKS);
       holdUntil = step + rng.nextIntExclusive(6, 40);
     }
-    script[step] = held;
+    script[step] = step === holdUntil - 1 ? held : null;
   }
   return script;
 }
 
 /**
- * A reactive policy: send each boat to whichever jumper on its side is
- * furthest down, and run for the shore once it is full. Reading state makes
- * input a function of the simulation, which is still fully deterministic --
- * and unlike the blind script it reliably scores, so the test would catch a
- * game that silently stopped registering catches.
+ * A reactive policy: chase whichever jumper is furthest down, and run for the
+ * shore once the boat is full. Reading state makes input a function of the
+ * simulation, which is still fully deterministic -- and unlike the blind
+ * script it reliably scores, so the test would catch a game that silently
+ * stopped registering catches.
  */
 function chasePolicy(state) {
-  const order = { left: null, right: null };
-  for (let side = 0; side < SIDES; side++) {
-    const boat = state.boats[side];
-    const key = side === 0 ? 'left' : 'right';
-    if (boat.aboard >= CAPACITY) {
-      order[key] = SHORE_DOCK;
-      continue;
-    }
-    let target = null;
-    for (const j of state.jumpers) {
-      if (j.side !== side) continue;
-      if (target === null || j.stop > target.stop) target = j;
-    }
-    if (target !== null) order[key] = LANE_DOCK[target.lane];
-    else if (boat.aboard > 0) order[key] = SHORE_DOCK;
-  }
-  return order;
+  const boat = state.boat;
+  if (boat.aboard >= CAPACITY) return SHORE_DOCK;
+  let target = null;
+  for (const j of state.jumpers) if (target === null || j.stop > target.stop) target = j;
+  if (target !== null) return LANE_DOCK[target.lane];
+  return boat.aboard > 0 ? SHORE_DOCK : null;
 }
 
 /** Play a full run and return a trace plus the final outcome. */
@@ -290,11 +276,11 @@ function playScripted(seed, script) {
     game.update(script[step]);
     const s = game.state;
     trace.push(
-      `${s.step}|${s.score}|${s.rescued}|${s.misses}|` +
-      `${s.boats.map((b) => `${b.dock}:${b.target}:${b.aboard}:${b.waiting}`).join(',')}|` +
-      `${s.jumpers.map((j) => `${j.id}:${j.side}:${j.lane}:${j.stop}`).join(';')}|` +
-      `${s.sharks.map((k) => `${k.id}:${k.side}:${k.pos}:${k.dir}`).join(';')}|` +
-      `${s.splashes.map((x) => `${x.side}:${x.lane}:${x.age}`).join(';')}`
+      `${s.step}|${s.score}|${s.rescued}|${s.misses}|${s.waiting}|` +
+      `${s.boat.dock}:${s.boat.target}:${s.boat.aboard}|` +
+      `${s.jumpers.map((j) => `${j.id}:${j.lane}:${j.stop}`).join(';')}|` +
+      `${s.sharks.map((k) => `${k.id}:${k.pos}:${k.dir}`).join(';')}|` +
+      `${s.splashes.map((x) => `${x.lane}:${x.age}`).join(';')}`
     );
   }
   return { game, trace: trace.join('\n'), state: game.state };
@@ -306,20 +292,18 @@ function playReactive(seed) {
   while (!game.isOver) {
     game.update(chasePolicy(game.state));
     const s = game.state;
-    trace.push(`${s.step}|${s.score}|${s.rescued}|${s.misses}|${s.boats.map((b) => `${b.dock}:${b.aboard}`).join(',')}`);
+    trace.push(`${s.step}|${s.score}|${s.rescued}|${s.misses}|${s.boat.dock}:${s.boat.aboard}`);
   }
   return { game, trace: trace.join('\n'), state: game.state };
 }
 
-// Seed 10 gives a script that actually delivers passengers; a script that
+// Seed 15 gives a script that actually delivers passengers; a script that
 // scored zero would let the final-score assertion below pass on 0 === 0.
-//
-// Blind input scores far more readily than it did in the old game -- 165 of
-// the first 200 script seeds deliver someone, against 40 of the first 400
-// before the rebuild. That is the order-based control showing up in the
-// numbers: a random order still parks a boat somewhere useful and leaves it
-// there, where a random held direction mostly drove into a wall.
-const script = recordOrderScript(10, RUN_STEPS);
+// Blind ordering still banks a few: 55 of the first 60 script seeds put
+// someone ashore, which is the order-based control showing up in the numbers
+// -- a random order parks the boat somewhere useful and leaves it there,
+// where a random held direction mostly drove into a wall.
+const script = recordOrderScript(15, RUN_STEPS);
 
 const scriptedA = playScripted(12345, script);
 const scriptedB = playScripted(12345, script);
@@ -345,37 +329,51 @@ check(
 check('a different seed changes the run', playScripted(12346, script).trace !== scriptedA.trace);
 check(
   'a different order script changes the run',
-  playScripted(12345, recordOrderScript(15, RUN_STEPS)).trace !== scriptedA.trace
-);
-
-// An order to one boat must not disturb the other. With two boats sharing one
-// update() this is the mistake that would be easiest to make and hardest to
-// see: the run would still be deterministic, just wrong.
-check(
-  'an order to one boat leaves the other one under its own standing order',
-  (() => {
-    const game = createRescueGame({ seed: 5 });
-    game.update({ left: SHORE_DOCK, right: null });
-    const rightTarget = game.state.boats[1].target;
-    for (let i = 0; i < 60; i++) game.update({ left: INNER_DOCK, right: null });
-    return game.state.boats[1].target === rightTarget;
-  })()
+  playScripted(12345, recordOrderScript(21, RUN_STEPS)).trace !== scriptedA.trace
 );
 
 // A null order is not the same as an order to stay put: the boat has to keep
-// running the errand it was already given, which is the whole reason one
-// thumb can drive two boats.
+// running the errand it was already given. This is the whole control model in
+// one assertion -- a tap is a complete instruction, and the time between taps
+// is time the player spends reading the ship rather than steering.
 check(
-  'a boat keeps running its last order while the thumb is elsewhere',
+  'the boat keeps running its last order after the thumb lifts',
   (() => {
     const game = createRescueGame({ seed: 5 });
-    game.update({ left: SHORE_DOCK, right: null });
-    const startedAt = game.state.boats[0].dock;
-    for (let i = 0; i < 200; i++) game.update({ left: null, right: null });
-    return game.state.boats[0].dock === SHORE_DOCK && startedAt !== SHORE_DOCK;
+    game.update(SHORE_DOCK);
+    const startedAt = game.state.boat.dock;
+    for (let i = 0; i < 200; i++) game.update(null);
+    return game.state.boat.dock === SHORE_DOCK && startedAt !== SHORE_DOCK;
   })()
 );
 
+// One order replaces another outright. There is no queue and nothing to
+// cancel, which is what makes a mistaken tap cheap to correct.
+check(
+  'a new order replaces the standing one',
+  (() => {
+    const game = createRescueGame({ seed: 5 });
+    game.update(SHORE_DOCK);
+    game.update(FAR_DOCK);
+    for (let i = 0; i < 200; i++) game.update(null);
+    return game.state.boat.dock === FAR_DOCK;
+  })()
+);
+
+// An order outside the board is clamped rather than believed. Input is the
+// one place a value from outside the simulation crosses in.
+check(
+  'an order off the end of the board is clamped onto it',
+  (() => {
+    const game = createRescueGame({ seed: 5 });
+    game.update(-99);
+    const low = game.state.boat.target;
+    game.update(99);
+    const high = game.state.boat.target;
+    game.update(2.7);
+    return low === SHORE_DOCK && high === FAR_DOCK && game.state.boat.target === 2;
+  })()
+);
 
 // A golden fingerprint. Unlike the assertions above, which only compare runs
 // to each other, this pins the actual content of a seeded run. It fails if
@@ -386,39 +384,31 @@ check(
 // deliberate decision rather than a number to re-baseline.
 //
 // It pins a digest of the whole trace, not just the closing summary. The
-// summary alone is far too coarse: in the old game, widening the run to the
-// shore moved the boat onto docks that had not existed before from step 22 of
-// a seed, and the run still ended on the same score, rescues, misses and
-// step. A fingerprint that reads "unchanged" through a change like that is
-// worse than none, because it is trusted. The summary is kept alongside so a
-// failure says something human before it says a hash mismatched.
+// summary alone is far too coarse: in an earlier game, widening the run to
+// the shore moved the boat onto docks that had not existed before from step
+// 22 of a seed, and the run still ended on the same score, rescues, misses
+// and step. A fingerprint that reads "unchanged" through a change like that
+// is worse than none, because it is trusted. The summary is kept alongside so
+// a failure says something human before it says a hash mismatched.
 //
 // Re-baselined five times for the parachute game, all before release, and
-// then once more here:
-//   6. the rebuild. The parachute descent became a dual-panel ship rescue:
-//      two boats under independent orders rather than one under a held
-//      direction, six jump lanes rather than four descent lanes, a crowd on
-//      the ship that the spawner draws from, and every tuning constant reset
-//      against a harness that models a thumb. Nothing about the old seed
-//      survives, and nothing was meant to.
-//   7. the slowdown. Playtesting said the run was too fast to read, so the
-//      fall was stretched by about a third, the jump cadence by 15%, and the
-//      difficulty ramp given four more rescues to climb. Three constants, but
-//      every seeded run changes: a different fall interval moves every jumper
-//      and therefore every catch. The control schemes are NOT in this
-//      fingerprint and cannot be -- a scheme only decides which order pair
-//      reaches update(), and the fingerprint is taken over a fixed script of
-//      order pairs precisely so that it measures the simulation and not the
-//      hand.
+// then three times here:
+//   6. the dual-panel rebuild: two boats under independent orders.
+//   7. the slowdown: a longer fall, an easier jump cadence, a later ramp.
+//   8. the single boat. Two boats of six positions became one of five, six
+//      jump lanes became two, and the spawn cadence was re-derived from
+//      scratch -- the old one left the boat under no pressure at all. The
+//      order handed to update() is now a bare dock index rather than a pair,
+//      so even the shape of a recorded run changed.
 const GOLDEN = {
   seed: 12345,
-  scriptSeed: 10,
-  score: 20,
-  rescued: 2,
+  scriptSeed: 15,
+  score: 100,
+  rescued: 8,
   misses: 4,
-  step: 854,
+  step: 1358,
   endReason: 'misses',
-  trace: '784d08392e710d11',
+  trace: '046d34bd33ff34f2',
 };
 const golden = playScripted(GOLDEN.seed, recordOrderScript(GOLDEN.scriptSeed, RUN_STEPS));
 const goldenRun = golden.state;
@@ -448,23 +438,17 @@ check(
   while (!game.isOver) {
     game.update(chasePolicy(game.state));
     const s = game.state;
+    const boat = s.boat;
 
-    for (const boat of s.boats) {
-      if (!Number.isInteger(boat.dock) || !Number.isInteger(boat.target)) allIntegers = false;
-      if (boat.dock < SHORE_DOCK || boat.dock > INNER_DOCK) allInRange = false;
-      if (boat.target < SHORE_DOCK || boat.target > INNER_DOCK) allInRange = false;
-      if (!Number.isInteger(boat.aboard) || boat.aboard < 0 || boat.aboard > CAPACITY) allInRange = false;
-      if (!Number.isInteger(boat.waiting) || boat.waiting < 0 || boat.waiting > CROWD_PER_SIDE) {
-        crowdSane = false;
-      }
-    }
+    if (!Number.isInteger(boat.dock) || !Number.isInteger(boat.target)) allIntegers = false;
+    if (boat.dock < SHORE_DOCK || boat.dock > FAR_DOCK) allInRange = false;
+    if (boat.target < SHORE_DOCK || boat.target > FAR_DOCK) allInRange = false;
+    if (!Number.isInteger(boat.aboard) || boat.aboard < 0 || boat.aboard > CAPACITY) allInRange = false;
+    if (!Number.isInteger(s.waiting) || s.waiting < 0 || s.waiting > CROWD) crowdSane = false;
 
     for (const j of s.jumpers) {
-      if (!Number.isInteger(j.side) || !Number.isInteger(j.lane) || !Number.isInteger(j.stop)) {
-        allIntegers = false;
-      }
-      if (j.side < 0 || j.side >= SIDES) allInRange = false;
-      if (j.lane < 0 || j.lane >= LANES_PER_SIDE) allInRange = false;
+      if (!Number.isInteger(j.lane) || !Number.isInteger(j.stop)) allIntegers = false;
+      if (j.lane < 0 || j.lane >= LANES) allInRange = false;
       if (j.stop < 0 || j.stop > SPLASH_STOP) allInRange = false;
     }
 
@@ -478,9 +462,7 @@ check(
     }
 
     for (const x of s.splashes) {
-      if (!Number.isInteger(x.age) || !Number.isInteger(x.side) || !Number.isInteger(x.lane)) {
-        allIntegers = false;
-      }
+      if (!Number.isInteger(x.age) || !Number.isInteger(x.lane)) allIntegers = false;
       if (x.age < 0 || x.age >= SPLASH_STEPS) allInRange = false;
       const frame = splashFrame(x);
       if (!Number.isInteger(frame) || frame < 0 || frame >= SPLASH_FRAME_COUNT) allInRange = false;
@@ -492,25 +474,31 @@ check(
   check('the crowd on deck never goes negative or grows', crowdSane);
 }
 
-// The layout: two mirrored sides, the shore at the outer end of each, and no
-// jump lane close enough to it that the ferry could be skipped.
+// The layout: one line of docks, the shore at one end, and no jump lane close
+// enough to it that the ferry could be skipped.
 check(
   'the layout is a small fixed set of segments',
-  Number.isInteger(SIDES) && SIDES === 2 &&
-    Number.isInteger(DOCKS_PER_SIDE) && DOCKS_PER_SIDE > 2 &&
+  Number.isInteger(DOCKS) && DOCKS > 2 &&
     SHORE_DOCK === 0 &&
-    INNER_DOCK === DOCKS_PER_SIDE - 1 &&
+    FAR_DOCK === DOCKS - 1 &&
     Number.isInteger(ARC_STOPS) && ARC_STOPS > 1 &&
     SPLASH_STOP === ARC_STOPS,
-  `${SIDES} sides, ${DOCKS_PER_SIDE} docks, ${ARC_STOPS} arc stops`
+  `${DOCKS} docks, ${ARC_STOPS} arc stops`
 );
 
+// The measured floor for the ferry being a decision at all: no lane may be
+// within one move of the shore, and there have to be at least two positions
+// of open water between the nearest lane and the landing. At four docks with
+// lanes any nearer, the round trip stopped costing anything and every loss
+// became a lane the boat simply did not reach in time -- see DOCKS and
+// LANE_DOCK in games/rescue.js for the numbers.
 check(
-  'each lane has its own dock, none of them the shore or beside it',
-  LANE_DOCK.length === LANES_PER_SIDE &&
+  'each lane has its own dock, and the nearest is a real trip from the shore',
+  LANE_DOCK.length === LANES &&
     MIN_LANE_DOCK === LANE_DOCK[0] &&
+    MIN_LANE_DOCK - SHORE_DOCK >= 2 &&
     LANE_DOCK.every((d, i) =>
-      Number.isInteger(d) && d > SHORE_DOCK + 1 && d <= INNER_DOCK && (i === 0 || d > LANE_DOCK[i - 1])
+      Number.isInteger(d) && d > SHORE_DOCK + 1 && d <= FAR_DOCK && (i === 0 || d > LANE_DOCK[i - 1])
     ),
   JSON.stringify(LANE_DOCK)
 );
@@ -542,33 +530,29 @@ check(
   `rescued ${reactiveA.state.rescued}, score ${reactiveA.state.score}`
 );
 
-// Both boats have to be worth using. A run where one side never scores would
-// mean the second panel is decoration, which is the failure this whole design
-// is built to avoid.
+// Every lane has to be worth working. A lane nobody is ever sent to would
+// mean part of the board is decoration.
 check(
-  'both sides of the board are actually played',
+  'every lane is actually used over a run',
   (() => {
     const game = createRescueGame({ seed: 12345 });
-    const jumped = [0, 0];
-    let before = game.state.boats.map((b) => b.waiting);
+    const seen = new Set();
     while (!game.isOver) {
       game.update(chasePolicy(game.state));
-      const now = game.state.boats.map((b) => b.waiting);
-      for (let side = 0; side < SIDES; side++) jumped[side] += before[side] - now[side];
-      before = now;
+      for (const j of game.state.jumpers) seen.add(j.lane);
     }
-    return jumped[0] > 4 && jumped[1] > 4;
+    return seen.size === LANES;
   })(),
-  'one side of the ship never sent anyone over'
+  'a lane went unused for a whole run'
 );
 
 check(
   'catching alone never scores -- only delivery does',
   (() => {
-    // Never order anything: the boats sit at their starting docks, which are
-    // lanes, so catches happen but nothing ever reaches a shore.
+    // Never order anything: the boat sits at the far dock, which is a lane,
+    // so catches happen but nothing ever reaches the shore.
     const stuck = createRescueGame({ seed: 4242 });
-    while (!stuck.isOver) stuck.update({ left: null, right: null });
+    while (!stuck.isOver) stuck.update(null);
     return stuck.state.score === 0 && stuck.state.rescued === 0;
   })(),
   'a run that never reached shore still scored'
@@ -596,12 +580,12 @@ check(
     let sawSplash = false;
     let maxLive = 0;
     while (!game.isOver) {
-      game.update({ left: null, right: null });
+      game.update(null);
       if (game.state.splashes.length > 0) sawSplash = true;
       maxLive = Math.max(maxLive, game.state.splashes.length);
       for (const x of game.state.splashes) if (x.age >= SPLASH_STEPS) return false;
     }
-    return sawSplash && maxLive <= SIDES * LANES_PER_SIDE;
+    return sawSplash && maxLive <= LANES;
   })()
 );
 
@@ -610,7 +594,7 @@ check(
   'running out of lives ends the run early',
   (() => {
     const idle = createRescueGame({ seed: 12345 });
-    while (!idle.isOver) idle.update({ left: null, right: null });
+    while (!idle.isOver) idle.update(null);
     return (
       idle.state.endReason === 'misses' &&
       idle.state.misses === MAX_MISSES &&
@@ -633,7 +617,7 @@ check(
   (() => {
     const done = playScripted(12345, script).game;
     const before = JSON.stringify(done.state);
-    for (let i = 0; i < 100; i++) done.update({ left: SHORE_DOCK, right: SHORE_DOCK });
+    for (let i = 0; i < 100; i++) done.update(SHORE_DOCK);
     return JSON.stringify(done.state) === before;
   })()
 );
@@ -644,7 +628,7 @@ function playThroughLoop(seed, orders, frameMs) {
   const loop = createLoop({
     update() {
       if (game.isOver) return;
-      game.update(orders[game.state.step] || { left: null, right: null });
+      game.update(orders[game.state.step] ?? null);
     },
   });
   while (!game.isOver && loop.stepCount < RUN_STEPS + 10) loop.advance(frameMs);

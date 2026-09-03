@@ -92,21 +92,27 @@
     };
 
     /**
-     * The proposed 3-wide passenger and 17-wide hull at 252.
+     * The shipped 5-wide passenger and 33-wide hull at 252.
      *
      * 168*6 and 252*4 are both 1008, so on a 3x phone these two grids fill
-     * exactly the same physical width -- the boat is the same size in
+     * exactly the same physical width -- the panel is the same size in
      * millimetres either way. All that changes is how many cells it is cut
      * into, which is what makes this an honest A/B rather than a comparison
      * of a small boat against a big one.
+     *
+     * The boat itself is no longer the same size in both: the board went from
+     * twelve moorings to five, and all of that room went into the hull. That
+     * is the point of looking at this on real glass -- the question is no
+     * longer whether four people fit, it is whether the grain still reads as
+     * separate segments at this cell size.
      */
     const NEW = {
-      label: 'proposed',
+      label: 'shipped',
       grid: [252, 330],
       // The real sprites, not copies. The whole value of this page is that
       // what it puts on the glass is what the game will put on the glass.
       passenger: PASSENGER,
-      slotPitch: 4,
+      slotPitch: 7,
       hull: HULL,
       crowd: DECK_PASSENGER,
       crowdPitch: 5,
@@ -178,21 +184,21 @@
         drawPattern(art.jumper, col, jumpRow + (i % 3) * (art.jumper.length + 3), i % 2 ? ink : ghost);
       }
 
-      /* --- the dock row: six ghost moorings a side, one lit boat --------
-         This is the assertion the grid change exists to satisfy: four
-         passengers standing in a hull, readable as four separate people. */
+      /* --- the dock row: a line of ghost moorings, one lit boat ---------
+         This is the assertion the grid exists to satisfy: four passengers
+         standing in a hull, readable as four separate people. The old grid
+         gets six moorings a side because that is the board it was drawn for;
+         the new one gets five across the panel, which is the board that
+         shipped. */
       const boatRow = Math.round(GH * 0.53);
-      const sideW = half(GW);
-      const pitch = Math.floor((sideW - hullW) / 5);
-      for (let side = 0; side < 2; side++) {
-        for (let dock = 0; dock < 6; dock++) {
-          const fromEdge = 2 + dock * pitch;
-          const left = side === 0 ? fromEdge : GW - hullW - fromEdge;
-          const style = side === 0 && dock === 3 ? ink : ghost;
-          drawPattern(art.hull, left, boatRow + art.passenger.length, style);
-          for (let s = 0; s < slots; s++) {
-            drawPattern(art.passenger, left + slotInset + s * art.slotPitch, boatRow, style);
-          }
+      const docks = art === NEW ? 5 : 12;
+      const pitch = Math.floor((GW - hullW - 4) / (docks - 1));
+      for (let dock = 0; dock < docks; dock++) {
+        const left = 2 + dock * pitch;
+        const style = dock === Math.floor(docks / 2) ? ink : ghost;
+        drawPattern(art.hull, left, boatRow + art.passenger.length, style);
+        for (let s = 0; s < slots; s++) {
+          drawPattern(art.passenger, left + slotInset + s * art.slotPitch, boatRow, style);
         }
       }
 

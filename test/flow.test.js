@@ -10,7 +10,6 @@
  */
 import { installDom } from './minidom.js';
 import { createMemoryStorage } from '../src/storage.js';
-import { INNER_DOCK } from '../src/games/rescue.js';
 
 const ROOT = new URL('../src/', import.meta.url).href;
 let failed = 0;
@@ -40,8 +39,7 @@ console.log('daily ritual flow\n');
 // --- first visit
 let dom = await bootApp('?date=2026-11-10');
 ok('start screen appears on first visit', dom.panelText()?.includes('HANDHELD DAILY'), String(dom.panelText()));
-ok('start screen offers PLAY, PRACTICE and the control toggle',
-   JSON.stringify(dom.buttons()) === '["PLAY","PRACTICE","CONTROL \u00b7 ONE AT A TIME"]', JSON.stringify(dom.buttons()));
+ok('start screen offers PLAY and PRACTICE', JSON.stringify(dom.buttons()) === '["PLAY","PRACTICE"]', JSON.stringify(dom.buttons()));
 dom.pump(120); // two seconds of frames with nobody having pressed PLAY
 ok('the run does not auto-start on load', dom.ids.panel.hidden === false && dom.buttons().includes('PLAY'),
    `panel hidden=${dom.ids.panel.hidden}, buttons ${JSON.stringify(dom.buttons())}`);
@@ -200,91 +198,46 @@ ok('leaving practice clears the practice mark', !dom.ids.lcd.classList.contains(
      JSON.stringify(earlyShare));
 }
 
-// --- control schemes
+// --- the control surface, end to end
 //
-// Two schemes ship and the toggle picks between them, so the wiring that has
-// to hold is: the button says which one is live, the preference outlives a
-// reload, and -- the only part that is not cosmetic -- a single touch reaches
-// one boat under 'side' and both under 'mirror'.
-//
-// Driven through main.js rather than against createInput directly, because
-// the thing that could plausibly break is the wiring: the renderer's orderAt,
-// the stored preference and the input module all have to agree about what a
-// column means.
+// One boat, one order: the column you touch picks the dock and the boat runs
+// there on its own. Driven through main.js rather than against createInput
+// directly, because the thing that could plausibly break is the wiring -- the
+// renderer's orderAt and the input module have to agree about what a column
+// means, and the panel is letterboxed inside the canvas so a fraction of the
+// canvas width is not a fraction of the board.
 {
-  const schemeStorage = createMemoryStorage();
-  let schemeDom = installDom({ hostname: 'localhost', search: '?date=2027-01-04', storage: schemeStorage });
+  const touchDom = installDom({
+    hostname: 'localhost',
+    search: '?date=2027-01-05',
+    storage: createMemoryStorage(),
+  });
   bootCount++;
   await import(`${ROOT}main.js?boot=${bootCount}`);
 
-  const controlButton = () =>
-    schemeDom.ids['panel-actions'].buttons().find((b) => b.startsWith('CONTROL'));
+  touchDom.click('PLAY');
+  const boat = () => window.handheldDaily.game.state.boat;
+  const startedAt = boat().target;
 
-  ok('the toggle starts on the side-addressed scheme', controlButton() === 'CONTROL · ONE AT A TIME', String(controlButton()));
+  touchDom.canvas.dispatch('pointerdown', { pointerId: 1, clientX: 60 });
+  touchDom.pump(2);
+  const ordered = boat().target;
+  ok('a touch orders the boat somewhere new', ordered !== startedAt, `${startedAt} -> ${ordered}`);
 
-  schemeDom.click(controlButton());
-  ok('pressing the toggle switches scheme', controlButton() === 'CONTROL · BOTH TOGETHER', String(controlButton()));
-  ok('the input module was switched too, not just the label',
-     window.handheldDaily.input.scheme === 'mirror', window.handheldDaily.input.scheme);
+  // The order has to stand after the thumb lifts -- that is the whole scheme.
+  touchDom.canvas.dispatch('pointerup', { pointerId: 1, clientX: 60 });
+  touchDom.pump(120);
+  ok('the order stands after the thumb lifts', boat().target === ordered,
+     `target ${boat().target}, wanted ${ordered}`);
+  ok('the boat actually travelled there', boat().dock === ordered,
+     `dock ${boat().dock}, target ${ordered}`);
 
-  schemeDom.click(controlButton());
-  ok('pressing it again cycles back', window.handheldDaily.input.scheme === 'side', window.handheldDaily.input.scheme);
-
-  // A scheme is a setting, not a result: it has to survive a reload.
-  schemeDom.click(controlButton());
-  schemeDom = installDom({ hostname: 'localhost', search: '?date=2027-01-04', storage: schemeStorage });
-  bootCount++;
-  await import(`${ROOT}main.js?boot=${bootCount}`);
-  ok('the chosen scheme survives a reload', window.handheldDaily.input.scheme === 'mirror', window.handheldDaily.input.scheme);
-
-  // ?control= is a link anyone may follow, so unlike the clock override it is
-  // not gated on the host -- and a nonsense value must not silently reset it.
-  schemeDom = installDom({ hostname: 'localhost', search: '?date=2027-01-04&control=side', storage: schemeStorage });
-  bootCount++;
-  await import(`${ROOT}main.js?boot=${bootCount}`);
-  ok('?control picks a scheme by link', window.handheldDaily.input.scheme === 'side', window.handheldDaily.input.scheme);
-
-  schemeDom = installDom({ hostname: 'localhost', search: '?date=2027-01-04&control=sideways', storage: schemeStorage });
-  bootCount++;
-  await import(`${ROOT}main.js?boot=${bootCount}`);
-  ok('a nonsense ?control leaves the stored scheme alone',
-     window.handheldDaily.input.scheme === 'side', window.handheldDaily.input.scheme);
-
-  /**
-   * Touch one column and report where each boat was ordered.
-   *
-   * The canvas is 420 CSS px wide at devicePixelRatio 2, so the panel is
-   * letterboxed and a column is not a fraction of the width -- which is
-   * exactly why input asks the renderer rather than doing the arithmetic
-   * itself. Reading the targets back afterwards is the only honest check.
-   */
-  function touchAndRead(dom, clientX) {
-    dom.click('PLAY');
-    dom.canvas.dispatch('pointerdown', { pointerId: 1, clientX });
-    dom.pump(2);
-    const [left, right] = window.handheldDaily.game.state.boats;
-    return { left: left.target, right: right.target };
-  }
-
-  schemeDom = installDom({ hostname: 'localhost', search: '?date=2027-01-05&control=side', storage: createMemoryStorage() });
-  bootCount++;
-  await import(`${ROOT}main.js?boot=${bootCount}`);
-  const sideTargets = touchAndRead(schemeDom, 100);
-  ok('side-addressed: a touch on the left half orders the left boat',
-     sideTargets.left !== INNER_DOCK, JSON.stringify(sideTargets));
-  ok('side-addressed: the other boat is left on its own standing order',
-     sideTargets.right === INNER_DOCK, JSON.stringify(sideTargets));
-
-  schemeDom = installDom({ hostname: 'localhost', search: '?date=2027-01-05&control=mirror', storage: createMemoryStorage() });
-  bootCount++;
-  await import(`${ROOT}main.js?boot=${bootCount}`);
-  const mirrorTargets = touchAndRead(schemeDom, 100);
-  ok('mirrored: one touch orders both boats',
-     mirrorTargets.left !== INNER_DOCK && mirrorTargets.right !== INNER_DOCK, JSON.stringify(mirrorTargets));
-  ok('mirrored: both boats take the same dock, so the pair stays a mirror image',
-     mirrorTargets.left === mirrorTargets.right, JSON.stringify(mirrorTargets));
-  ok('mirrored: the dock is the one the touch landed on',
-     mirrorTargets.left === sideTargets.left, `${JSON.stringify(mirrorTargets)} vs ${JSON.stringify(sideTargets)}`);
+  // Two touches at different columns must reach different docks, or the whole
+  // panel is addressing one place.
+  touchDom.canvas.dispatch('pointerdown', { pointerId: 2, clientX: 700 });
+  touchDom.pump(2);
+  ok('a touch at the other end of the panel orders a different dock',
+     boat().target !== ordered, `${ordered} -> ${boat().target}`);
 }
 
 console.log(`\n${failed === 0 ? 'all good' : failed + ' failed'}`);

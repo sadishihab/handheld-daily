@@ -5,133 +5,150 @@ green glass, hard on/off, no smooth motion. Everyone gets the same puzzle each
 UTC day.
 
 Entities occupy fixed segment positions rather than continuous coordinates. A
-jumper is always at exactly one (side, lane, stop); a boat sits at exactly one
-(side, dock); a passenger waiting to jump is one of ninety-two numbered places
+jumper is always at exactly one (lane, stop); the boat sits at exactly one of
+five docks; a passenger waiting to jump is one of ninety-two numbered places
 on the ship's decks. Every position the board can hold is drawn faintly at all
 times, the way an unlit LCD segment stays visible in the glass, so the player
 reads the whole board at a glance -- and so the panel looks populated even
 when little is happening.
 
-**Ship rescue** -- a liner burns amidships across the middle of the panel,
-with land at both outer edges. Passengers crowd its two decks and go over the
-side into the water, arcing down through six jump lanes. A boat on each side
-catches them, carries up to four, and ferries them out to the shore at its own
-end of the board. Sharks patrol the water and take whoever is aboard, but
-never a life. Only passengers put ashore score, with a bonus for landing a
-full boat of four. Four misses or sixty seconds ends the run, and the
-difficulty ramps with rescues rather than the clock alone.
+**Ship rescue** -- a liner burns amidships across the top of the panel. Its
+passengers go over the side into the water below, arcing down through two jump
+lanes. One boat works the water: it catches them, carries up to four, and runs
+them to the single shore at the near end of the board. Sharks patrol the water
+and take whoever is aboard, but never a life. Only passengers put ashore
+score, with a bonus for landing a full boat of four. Four misses or sixty
+seconds ends the run, and the difficulty ramps with rescues rather than the
+clock alone.
 
 The run to the shore is the entire cost of a delivery. Touching land unloads
 the whole boat instantly -- there is no pause to wait out -- so what a run
-costs you is the time both boats spend out of position, with the ship filling
-the air behind them. Measured over 120 seeds, 53% of everything lost is lost
-to that errand.
+costs you is the time the boat spends out of position, with the ship filling
+the air behind it. Measured over 120 seeds, 59% of everything lost is lost to
+that errand, which is the largest single cause and the number the whole board
+is shaped around.
 
-## Two boats, one thumb
+## One boat, one thumb
 
-This is the design problem the game is built around, and it is worth stating
-plainly because the obvious answer is the wrong one.
-
-**Touch a side of the panel to command that side's boat, and it heads for the
-dock you touched.** The half you touch picks the boat -- no mode, no selected
-boat to keep track of, nothing to switch -- and the column picks the
-destination. Lift your thumb and the boat carries on running that errand while
-you deal with the other side. Holding and sliding still steers, because a held
-finger re-issues its order every step.
+**Touch a column and the boat heads for that dock.** The column picks the
+destination, so a tap is a whole instruction rather than the start of a hold,
+and the order stands after you lift -- the boat runs the errand while you go
+back to watching the deck. Holding and sliding steers, because a held finger
+re-issues its order every step.
 
 The point is that an order is *discrete and persistent*. A held rudder needs a
-continuous stream of input per boat, and a thumb can only produce one stream;
-that forces a mode, and the boat you are not holding sits parked. So the game
-asks you to schedule two ferries rather than to steer two boats, which is a
-thing one thumb can actually do.
+continuous stream of input, which is what a thumb on glass is worst at: no
+edge to feel, no detent to stop at, and the player's attention on the boat
+instead of on the ship they are meant to be reading.
 
-### The mirrored alternative
+On a desktop, left/right or `A`/`D` nudge a dock at a time; up sends the boat
+straight home and down sends it out to the far water.
 
-A second scheme ships alongside it, chosen with the `CONTROL` button on the
-start screen or with `?control=mirror`:
+## Five positions, and why not four
 
-**Mirrored** -- one input, both boats. The column you touch picks a dock index
-and *both* boats take it, each measured from its own shore, so the pair is
-always a mirror image of itself. Nothing to select and nothing to cross to.
-The price is that there is no way to send one boat home while the other waits
-at the ship.
+The board is five docks: four of open water and a fifth that is the shore.
+That number was asked for, and it very nearly did not work.
 
-Both schemes are shipped rather than one being chosen, because the argument
-between them is about feel and the harness can only settle the arithmetic
-half. The arithmetic half is not close, and it is below.
+An earlier note on this game warned that at four positions the run to the
+shore stopped being a decision -- it was three moves long, so the errand cost
+nothing and every loss became a lane the boat simply failed to reach. Re-swept
+for a single boat at the slower pace, that warning is not only still true, it
+is worse: a slower fall gives the boat *more* time to get home and back.
+120 seeds each, one cadence, lanes over the three docks furthest from shore:
 
-### What the harness says
+| positions | ferry's share of losses | verdict |
+| --- | --- | --- |
+| 4 | 0% | unloseable; every loss is arriving late |
+| 5 | 22% | not a decision |
+| 6 | 52% | works |
+| 7 | 63% | works |
 
-Measured against bots that model a hand -- one touch at a time, a delay before
-a new jumper is noticed, a larger delay to carry the thumb across the panel.
-120 seeds each, at the pace the game currently runs, with the middling of the
-three hands (~370ms to notice a jumper, ~430ms to cross):
+On dock count alone, five fails. What rescues it is the *lane placement*,
+which turns out to be the stronger lever of the two:
 
-| control | score | run | ended on misses | biggest cause of loss |
-| --- | --- | --- | --- | --- |
-| side-addressed, one thumb | 532 | 60.0s | 0% | the ferry, 53% |
-| side-addressed, two thumbs | 534 | 60.0s | 0% | the ferry, 50% |
-| mirrored, one input | 459 | 59.6s | 10% | a full boat, 51% |
-| select a boat, then steer it | 432 | 56.8s | 68% | the ferry, 54% |
+| lanes over docks | ferry's share of losses | average score |
+| --- | --- | --- |
+| 1-2-3-4 | 5% | 808 |
+| 2-3-4 | 22% | 806 |
+| 2-4 | 31% | 798 |
+| **3-4** | **55%** | **734** |
+| 4 alone | 99% | 615 |
 
-Two results matter here. The first is that **one thumb scores 532 against two
-thumbs' 534** -- the control costs essentially nothing, so a phone player is
-not playing a degraded version of the game.
+So the shipped board is five positions with **two** lanes, over the two docks
+furthest from the shore. A lane one move from the landing is a free rescue,
+and once free rescues exist a player takes them and the ferry stops mattering.
 
-The second is what mirrored loses, which is not points but the decision.
-Half of its losses are a boat that was already full and could not be sent
-home, and the ferry -- the thing the whole design exists to charge for --
-falls from 53% of losses to 7%. A mirrored player is not solving a cheaper
-version of the problem; they are solving a different one.
+Slowing the boat was tried instead of dropping a lane, because keeping three
+lanes is worth something. It does not work: at 17 steps a dock the ferry only
+reaches 39%, and the losses it adds are jumpers the boat set off for and did
+not reach. That is a harder catch, not a dearer errand.
 
-### Controls on a desktop
+**Stated plainly: five positions and three lanes cannot both be had.** If
+three lanes matter more than the dock count, six positions is the minimum --
+that is where three lanes reach 52% and the boat speed can stay where it is.
 
-Side-addressed: `A`/`D` work the left boat and the arrow keys the right one,
-on each side outward-key-to-its-own-shore; `W` and the up arrow send a boat
-straight home.
+The cost of two lanes is composition: two columns of falling figures where the
+old board had six. It is paid back in the arc, which swings each jump most of
+a dock pitch sideways on the way down, so the pair of lanes sweeps a wide band
+of the panel instead of dropping down two narrow chimneys. `render.test.js`
+asserts that swing rather than trusting it.
 
-Mirrored: there is no left boat and no right boat, only a distance from the
-shores, so every key means out or in. `A` and the left arrow pull the pair out
-toward the land, `D` and the right arrow push it back in toward the ship, and
-`W`/up sends both straight home.
+## What the harness says
 
-## Pace
+120 seeds, against bots that model a thumb -- one touch at a time, a delay
+before a new jumper is noticed, a delay to move:
 
-The run was slowed down after playtesting, and the three constants that set
-the pace turned out not to be interchangeable:
+| | value |
+| --- | --- |
+| average score | 689 |
+| passengers rescued | 45.9 of 92 |
+| full boats landed | 11.5 |
+| misses spent (of four) | 3.21 |
+| average run length | 58.9s |
+| ends on misses / on the clock | 42% / 58% |
+| **losses to the ferry** | **59%** |
+| losses to arriving late | 41% |
+| losses to a full boat, or to doing nothing | 0% |
+| runs that empty the deck | 0% |
 
-- **Fall speed** was stretched by about a third (`FALL_INTERVAL_START` 38 to
-  50). This is free and then some -- a slower arc is a longer catch window, so
-  it buys reaction time *and* raises the score, and the ferry's share of
-  losses does not move.
-- **Jump cadence** was eased by 15% (`SPAWN_INTERVAL_START` 98 to 112). This
-  one is expensive. With jumpers rarer, a boat can finish a round trip between
-  them and the ferry stops costing anything: pushed to +80%, the ferry's share
-  of losses reaches 0% and every remaining loss is simply arriving late. 15% is
-  as far as it goes before the game's one decision starts switching off.
-- **The ramp** was given four more rescues to climb (`RESCUE_RAMP_TARGET` 26
-  to 30). Mild and cheap.
+A run is close to a coin flip between running out of lives and running out of
+clock, and the largest single thing that kills one is being away at the shore.
 
-Sharks were deliberately left alone. With everything else stretched they
-arrive relatively more often, which puts back a little of the pressure the
-fall gave up.
+Fill-to-4 versus ferry-one, same bot with only its unload threshold changed:
 
-One honest caveat about the table above: at this pace the bots almost stop
-losing, so "ended on misses" is no longer a useful difficulty signal for
-them -- they have perfect anticipation and only a reaction delay, and slowing
-the game is exactly the thing that delay was fighting. The number that still
-discriminates is which cause the losses come from, which is why the table
-reports that rather than a difficulty percentage.
+| runs home with | score | ends on misses | losses to the ferry |
+| --- | --- | --- | --- |
+| 1 aboard | 255 | 100% | 77% |
+| 2 aboard | 382 | 100% | 62% |
+| 3 aboard | 443 | 93% | 58% |
+| 4 aboard | 689 | 42% | 59% |
+
+Holding out for a full boat is worth 170% more than banking every catch, which
+is what makes "one more before I go" the question the run is made of -- and
+the impatient version loses *more* to the ferry, not less, because it makes
+the trip three times as often.
+
+One honest caveat. Three hands were modelled -- roughly 200ms, 370ms and 570ms
+to notice a new jumper -- and they score 689, 689 and 687. Reaction time has
+stopped mattering almost entirely. With one boat and two neighbouring lanes,
+covering the lanes is never the hard part; deciding when to leave them is.
+This board plays a planning game, and the numbers say so.
 
 ## Where the fiction bends
 
-Passengers go over the side beside the fire amidships, not off the ship's two
-ends. The literal version does not survive the geometry: land is at the outer
-edges, so a jumper leaving the bow or stern lands on top of a shore, the ferry
-is over before it starts, and the run to land -- the whole game -- costs
-nothing. Coming down inboard and being carried out is what makes the trip
-worth anything, so the fire is amidships and the crowd thins from the middle
-outward as people reach the rail.
+Passengers go over the side amidships, beside the fire, rather than off the
+ship's two ends. The literal version does not survive the geometry: the ship
+lies across the top of the panel and the shore is at one end of the water
+below it, so a jumper leaving the near end lands within a move of the landing,
+the ferry is over before it starts, and the run to land -- the whole game --
+costs nothing. That is the four-dock failure again, arrived at from a
+different direction. Coming down out in the water and being carried in is what
+makes the trip worth anything, so the fire is amidships and the crowd thins
+from the middle of the deck outward as people reach the rail.
+
+The jump also drifts sideways as it falls, which no falling body does. It
+earns its keep: two lanes is what makes the ferry expensive, and the swing is
+what stops two lanes looking like two chimneys.
 
 Vanilla HTML, CSS, and ES modules -- no framework, no build step, no runtime
 dependencies.
@@ -145,8 +162,7 @@ src/registry.js            minigame registry -- the one place logic meets render
 src/rng.js                 seeded PRNG (mulberry32) -- the only source of randomness
 src/daily.js               UTC daily seed, puzzle number, countdown to next puzzle
 src/loop.js                fixed-timestep loop, 60 logic steps/sec, decoupled from rAF
-src/input.js               touch and keyboard -> one order per boat, per step
-src/controls.js            which control scheme is in force, and where it is remembered
+src/input.js               touch and keyboard -> one order per fixed step
 src/progress.js            streaks, one-run-per-day, score history
 src/storage.js             localStorage adapter with an in-memory fallback
 src/share.js               share text formatting + Web Share / clipboard delivery
@@ -163,7 +179,7 @@ test/determinism.test.js   determinism suite
 test/progress.test.js      streaks, daily lockout, share text, dev clock
 test/styles.test.js        cascade rules the UI depends on
 test/render.test.js        segment layout, ghost board, crowd, painted-art collisions
-test/flow.test.js          end-to-end ritual, and the control-scheme wiring, against a mini-DOM
+test/flow.test.js          end-to-end ritual, and the control wiring, against a mini-DOM
 test/minidom.js            the mini-DOM the flow test boots the app in
 grid-test.html             dev-only: the cell grid at true size, for checking on a phone
 docs/DETERMINISM.md        rules simulation code must follow
@@ -231,7 +247,7 @@ ignores all three and serves the real clock.
 npm test
 ```
 
-Runs four suites with Node -- no framework, no `npm install` needed.
+Runs five suites with Node -- no framework, no `npm install` needed.
 
 - `determinism.test.js` -- a fixed seed produces byte-identical output across
   repeat runs and across 30/60/120Hz frame pacing, different seeds diverge,
@@ -248,13 +264,17 @@ Runs four suites with Node -- no framework, no `npm install` needed.
   entities land on their own segments, the crowd on deck lights and
   extinguishes one figure per passenger and does it from the middle of the
   ship outward, the flail-and-splash steps through all five of its frames,
-  painted background art never occupies a cell an entity can use, the two
-  halves of the board are exact reflections, and a touch anywhere on the glass
-  addresses the boat and dock it looks like it addresses.
+  painted background art never occupies a cell an entity can use, four
+  passengers in the hull are five cells wide with two clear columns between
+  them, neighbouring moorings and sharks stay separate objects, the jump arc
+  really does swing most of a dock pitch sideways, and every column on the
+  glass orders the dock it looks like it orders.
 - `flow.test.js` -- boots the real `src/main.js` against a mini-DOM and walks
   the whole ritual: play, lock out, roll over to the next day, share, practice,
   and the same walk on a date before launch, where every screen and the share
-  card must still read #1.
+  card must still read #1. It also drives a real touch through the canvas and
+  checks the boat goes where the column says and stays there once the thumb
+  lifts.
 
 The split matters: `flow.test.js` drives a DOM stub with no CSS cascade, so a
 rule that visually defeats `element.hidden` is invisible to it. Anything that

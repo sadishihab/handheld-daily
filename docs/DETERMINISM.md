@@ -107,19 +107,16 @@ cannot put one. A new minigame should reach for the same shape before it
 reaches for coordinates.
 
 Input is held to the same rule. The simulation is not handed a held direction
-but an *order* per boat -- a dock index, or null for "no new order this step"
--- so the thing crossing from the input layer into the run is a small integer,
-and a recorded run is a list of integer pairs. Turning a touch position into a
-dock index happens in `src/render/`, outside the simulation, where a float
+but an *order* -- a dock index, or null for "no new order this step" -- so the
+thing crossing from the input layer into the run is a single small integer,
+and a recorded run is a list of them. Turning a touch position into a dock
+index happens in `src/render/`, outside the simulation, where a float
 coordinate is allowed to exist.
 
-That is also why there can be more than one control scheme without a second
-fingerprint. A scheme only decides which order pair a touch produces --
-side-addressed fills in one side, mirrored fills in both -- and the simulation
-never learns which one was used. A recorded run is the list of integer pairs,
-so the same list replays identically no matter which thumb, scheme or device
-generated it. Anything that made the simulation branch on the scheme would
-break this immediately and must not be added.
+The simulation therefore never learns anything about the device, the thumb, or
+where on the glass the touch landed -- only which dock came out the other end.
+That is what makes a recorded run replayable anywhere, and anything that made
+update() branch on how an order was produced would break it immediately.
 
 Difficulty ramps on an integer 0..1000 "pressure" value blended from rescues
 and elapsed steps, rather than on a float fraction, for the same reason.
